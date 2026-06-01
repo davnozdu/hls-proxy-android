@@ -17,9 +17,16 @@
     <string name="source_title">Быстрая настройка</string>
     <string name="playlist_hint">Плейлист (URL)</string>
     <string name="epg_hint">ТВ программа / EPG (URL)</string>
-    <string name="save_source">Сохранить плейлист и программу</string>
-    <string name="source_note">Здесь только плейлист и телепрограмма. Все остальные настройки — в веб-интерфейсе (кнопка «Открыть веб-интерфейс» или адрес выше в браузере).</string>
+    <string name="save_source">Сохранить ссылки и программу</string>
+    <string name="load_local">Загрузить локальный плейлист (файл)</string>
+    <string name="source_note">Источник плейлиста — либо ссылка, либо локальный файл (одно из двух). Телепрограмма (EPG) работает с любым. Сохранение с пустым полем «Плейлист» не сбрасывает локальный файл. Все прочие настройки — в веб-интерфейсе.</string>
     <string name="source_saved">Сохранено, применяю…</string>
+    <string name="source_current">Источник: %1$s</string>
+    <string name="src_link">ссылка</string>
+    <string name="src_file">локальный файл</string>
+    <string name="src_none">не задан</string>
+    <string name="local_loaded">Локальный плейлист загружен</string>
+    <string name="local_error">Не удалось прочитать файл</string>
 
     <string name="start">Пуск</string>
     <string name="stop">Стоп</string>

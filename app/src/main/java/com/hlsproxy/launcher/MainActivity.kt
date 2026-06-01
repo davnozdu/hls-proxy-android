@@ -63,10 +63,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var etPlaylist: EditText
     private lateinit var etEpg: EditText
     private lateinit var btnSaveSource: Button
+    private lateinit var btnLoadLocal: Button
+    private lateinit var tvSource: TextView
     private var lastQrUrl: String? = null
 
     private val notifPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
+    private val openDocLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let { onLocalPlaylistPicked(it) }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -97,6 +104,8 @@ class MainActivity : AppCompatActivity() {
         etPlaylist = findViewById(R.id.etPlaylist)
         etEpg = findViewById(R.id.etEpg)
         btnSaveSource = findViewById(R.id.btnSaveSource)
+        btnLoadLocal = findViewById(R.id.btnLoadLocal)
+        tvSource = findViewById(R.id.tvSource)
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
@@ -105,6 +114,7 @@ class MainActivity : AppCompatActivity() {
         val (curPlaylist, curEpg) = ConfigStore.read(this)
         etPlaylist.setText(curPlaylist)
         etEpg.setText(curEpg)
+        updateSourceLabel()
 
         btnStart.setOnClickListener {
             Prefs.setUserStopped(this, false)
@@ -131,6 +141,7 @@ class MainActivity : AppCompatActivity() {
         btnClearLog.setOnClickListener { ProxyStatus.clearLog() }
         btnShareLog.setOnClickListener { shareLog() }
         btnSaveSource.setOnClickListener { saveSource() }
+        btnLoadLocal.setOnClickListener { openDocLauncher.launch(arrayOf("*/*")) }
         tvAddress.setOnClickListener { webUrl()?.let { copyToClipboard(it) } }
         tvPlaylist.setOnClickListener { playlistUrl()?.let { copyToClipboard(it) } }
         tvEpg.setOnClickListener { epgUrl()?.let { copyToClipboard(it) } }
@@ -246,11 +257,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveSource() {
-        ConfigStore.save(this, etPlaylist.text.toString(), etEpg.text.toString())
+        ConfigStore.saveUrlAndEpg(this, etPlaylist.text.toString(), etEpg.text.toString())
         Toast.makeText(this, R.string.source_saved, Toast.LENGTH_SHORT).show()
-        // Применяем: снимаем флаг ручной остановки и перезапускаем прокси.
+        updateSourceLabel()
+        applyAndRestart()
+    }
+
+    private fun onLocalPlaylistPicked(uri: Uri) {
+        try {
+            val dest = ConfigStore.localPlaylistFile(this)
+            contentResolver.openInputStream(uri)?.use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            } ?: throw IllegalStateException("no stream")
+            ConfigStore.saveLocalFile(this)
+            etPlaylist.setText("") // источник теперь локальный файл
+            updateSourceLabel()
+            Toast.makeText(this, R.string.local_loaded, Toast.LENGTH_SHORT).show()
+            applyAndRestart()
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.local_error, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun applyAndRestart() {
         Prefs.setUserStopped(this, false)
         ProxyController.restart(this)
+    }
+
+    private fun updateSourceLabel() {
+        val label = when (ConfigStore.sourceType(this)) {
+            "link" -> getString(R.string.src_link)
+            "file" -> getString(R.string.src_file)
+            else -> getString(R.string.src_none)
+        }
+        tvSource.text = getString(R.string.source_current, label)
     }
 
     private fun shareLog() {
