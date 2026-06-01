@@ -27,4 +27,5 @@
 
     <string name="port_invalid">Введите порт от 1024 до 65535</string>
     <string name="port_saved">Порт сохранён</string>
+    <string name="settings_unavailable">Не удалось открыть настройки. Откройте «О приложении» → «Батарея» вручную.</string>
 </resources>

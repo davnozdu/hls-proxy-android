@@ -57,9 +57,18 @@ class MainActivity : AppCompatActivity() {
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
 
-        btnStart.setOnClickListener { ProxyController.start(this) }
-        btnStop.setOnClickListener { ProxyController.stop(this) }
-        btnRestart.setOnClickListener { ProxyController.restart(this) }
+        btnStart.setOnClickListener {
+            Prefs.setUserStopped(this, false)
+            ProxyController.start(this)
+        }
+        btnStop.setOnClickListener {
+            Prefs.setUserStopped(this, true)
+            ProxyController.stop(this)
+        }
+        btnRestart.setOnClickListener {
+            Prefs.setUserStopped(this, false)
+            ProxyController.restart(this)
+        }
         btnApplyPort.setOnClickListener { applyPort() }
         swAutostart.setOnCheckedChangeListener { _, checked -> Prefs.setAutostart(this, checked) }
         btnBackground.setOnClickListener { openBatterySettings() }
@@ -68,6 +77,15 @@ class MainActivity : AppCompatActivity() {
         requestRuntimePermissions()
 
         btnStart.requestFocus()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // Автостарт при открытии: если пользователь не останавливал сервис вручную
+        // и он сейчас не запущен — поднимаем (старт идемпотентен, если уже работает).
+        if (!Prefs.isUserStopped(this) && ProxyStatus.state.value == ProxyStatus.State.STOPPED) {
+            ProxyController.start(this)
+        }
     }
 
     override fun onResume() {
@@ -145,24 +163,40 @@ class MainActivity : AppCompatActivity() {
         openBatterySettings()
     }
 
-    /** Открывает экран разрешения фоновой работы (несколько вариантов на случай разных прошивок). */
+    /** Открывает экран разрешения фоновой работы. */
+    @SuppressLint("BatteryLife")
     private fun openBatterySettings() {
-        val intents = listOfNotNull(
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val alreadyAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            pm.isIgnoringBatteryOptimizations(packageName)
+
+        // Если разрешение ещё не выдано — показываем системный запрос. Если уже выдано,
+        // системный диалог ничего не покажет, поэтому открываем «О приложении».
+        val intents = ArrayList<Intent>()
+        if (!alreadyAllowed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            intents.add(
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    .setData(Uri.parse("package:$packageName")) else null,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS) else null,
+                    .setData(Uri.parse("package:$packageName"))
+            )
+        }
+        intents.add(
             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
                 .setData(Uri.parse("package:$packageName"))
         )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            intents.add(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        }
+
         for (intent in intents) {
-            try {
-                startActivity(intent)
-                return
-            } catch (_: Exception) {
-                // пробуем следующий вариант
+            if (intent.resolveActivity(packageManager) != null) {
+                try {
+                    startActivity(intent)
+                    return
+                } catch (_: Exception) {
+                    // пробуем следующий вариант
+                }
             }
         }
+        Toast.makeText(this, R.string.settings_unavailable, Toast.LENGTH_LONG).show()
     }
 }

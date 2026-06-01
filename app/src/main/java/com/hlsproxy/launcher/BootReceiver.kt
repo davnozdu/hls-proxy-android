@@ -12,6 +12,7 @@ class BootReceiver : BroadcastReceiver() {
             action == "android.intent.action.QUICKBOOT_POWERON"
         ) {
             if (Prefs.isAutostart(context)) {
+                Prefs.setUserStopped(context, false)
                 ProxyController.start(context)
             }
         }

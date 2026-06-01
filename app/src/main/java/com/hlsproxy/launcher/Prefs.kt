@@ -15,4 +15,8 @@ object Prefs {
 
     fun isAutostart(c: Context): Boolean = sp(c).getBoolean("autostart", true)
     fun setAutostart(c: Context, value: Boolean) = sp(c).edit().putBoolean("autostart", value).apply()
+
+    /** Был ли сервис остановлен пользователем вручную (тогда не поднимаем его сами при открытии). */
+    fun isUserStopped(c: Context): Boolean = sp(c).getBoolean("userStopped", false)
+    fun setUserStopped(c: Context, value: Boolean) = sp(c).edit().putBoolean("userStopped", value).apply()
 }
