@@ -5,15 +5,21 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -37,6 +43,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnRestart: Button
     private lateinit var swAutostart: MaterialSwitch
     private lateinit var btnBackground: Button
+    private lateinit var tvStats: TextView
+    private lateinit var ivQr: ImageView
+    private lateinit var tvQrHint: TextView
+    private lateinit var btnShare: Button
+    private lateinit var btnOpenWeb: Button
+    private var lastQrUrl: String? = null
 
     private val notifPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -57,6 +69,11 @@ class MainActivity : AppCompatActivity() {
         btnRestart = findViewById(R.id.btnRestart)
         swAutostart = findViewById(R.id.swAutostart)
         btnBackground = findViewById(R.id.btnBackground)
+        tvStats = findViewById(R.id.tvStats)
+        ivQr = findViewById(R.id.ivQr)
+        tvQrHint = findViewById(R.id.tvQrHint)
+        btnShare = findViewById(R.id.btnShare)
+        btnOpenWeb = findViewById(R.id.btnOpenWeb)
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
@@ -76,6 +93,8 @@ class MainActivity : AppCompatActivity() {
         btnApplyPort.setOnClickListener { applyPort() }
         swAutostart.setOnCheckedChangeListener { _, checked -> Prefs.setAutostart(this, checked) }
         btnBackground.setOnClickListener { openBatterySettings() }
+        btnShare.setOnClickListener { sharePlaylist() }
+        btnOpenWeb.setOnClickListener { openWebInterface() }
 
         observeState()
         requestRuntimePermissions()
@@ -122,6 +141,9 @@ class MainActivity : AppCompatActivity() {
                         tvLog.text = lines.takeLast(80).joinToString("\n")
                     }
                 }
+                launch {
+                    ProxyStatus.stats.collect { s -> renderStats(s) }
+                }
             }
         }
     }
@@ -150,12 +172,114 @@ class MainActivity : AppCompatActivity() {
             tvAddress.text = "${getString(R.string.webui_label)}: $base"
             tvPlaylist.text = "${getString(R.string.playlist_label)}: $base/playlist.m3u8"
             tvEpg.text = "${getString(R.string.epg_label)}: $base/epg.xml.gz"
+            updateQr("$base/playlist.m3u8")
         } else {
             val none = getString(R.string.address_none)
             tvAddress.text = "${getString(R.string.webui_label)}: $none"
             tvPlaylist.text = "${getString(R.string.playlist_label)}: $none"
             tvEpg.text = "${getString(R.string.epg_label)}: $none"
+            updateQr(null)
         }
+    }
+
+    private fun playlistUrl(): String? {
+        val ip = NetUtil.localIp(this) ?: return null
+        return "http://$ip:${Prefs.getPort(this)}/playlist.m3u8"
+    }
+
+    private fun webUrl(): String? {
+        val ip = NetUtil.localIp(this) ?: return null
+        return "http://$ip:${Prefs.getPort(this)}"
+    }
+
+    private fun renderStats(s: ProxyStatus.Stats?) {
+        if (s == null || ProxyStatus.state.value != ProxyStatus.State.RUNNING) {
+            tvStats.text = ""
+            return
+        }
+        val ramMb = if (s.ramKb > 0) s.ramKb / 1024 else 0
+        tvStats.text = getString(R.string.stats_format, ramMb, formatUptime(s.uptimeMs), s.streams)
+    }
+
+    private fun formatUptime(ms: Long): String {
+        val sec = ms / 1000
+        val h = sec / 3600
+        val m = (sec % 3600) / 60
+        val s = sec % 60
+        return String.format("%d:%02d:%02d", h, m, s)
+    }
+
+    private fun updateQr(url: String?) {
+        if (url == null) {
+            ivQr.visibility = View.GONE
+            tvQrHint.visibility = View.GONE
+            lastQrUrl = null
+            return
+        }
+        if (url == lastQrUrl && ivQr.drawable != null) return
+        lastQrUrl = url
+        val bmp = makeQr(url, 480)
+        if (bmp != null) {
+            ivQr.setImageBitmap(bmp)
+            ivQr.visibility = View.VISIBLE
+            tvQrHint.visibility = View.VISIBLE
+        } else {
+            ivQr.visibility = View.GONE
+            tvQrHint.visibility = View.GONE
+        }
+    }
+
+    private fun makeQr(text: String, size: Int): Bitmap? {
+        return try {
+            val matrix = QRCodeWriter().encode(text, BarcodeFormat.QR_CODE, size, size)
+            val w = matrix.width
+            val h = matrix.height
+            val pixels = IntArray(w * h)
+            for (y in 0 until h) {
+                val off = y * w
+                for (x in 0 until w) {
+                    pixels[off + x] = if (matrix.get(x, y)) Color.BLACK else Color.WHITE
+                }
+            }
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+                setPixels(pixels, 0, w, 0, 0, w, h)
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun sharePlaylist() {
+        val url = playlistUrl()
+        if (url == null) {
+            Toast.makeText(this, R.string.address_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val send = Intent(Intent.ACTION_SEND)
+            .setType("text/plain")
+            .putExtra(Intent.EXTRA_TEXT, url)
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.share_playlist)))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.no_app, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun openWebInterface() {
+        val url = webUrl()
+        if (url == null) {
+            Toast.makeText(this, R.string.address_none, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val view = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        if (view.resolveActivity(packageManager) != null) {
+            try {
+                startActivity(view)
+                return
+            } catch (_: Exception) {
+            }
+        }
+        Toast.makeText(this, R.string.no_app, Toast.LENGTH_LONG).show()
     }
 
     private fun requestRuntimePermissions() {

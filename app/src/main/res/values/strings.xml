@@ -19,6 +19,11 @@
     <string name="restart">Перезапуск</string>
 
     <string name="autostart">Автозапуск при включении</string>
+    <string name="share_playlist">Поделиться плейлистом</string>
+    <string name="open_web">Открыть веб-интерфейс</string>
+    <string name="qr_hint">QR плейлиста (наведите клиент/телефон)</string>
+    <string name="no_app">Нет подходящего приложения на устройстве</string>
+    <string name="stats_format">RAM: %1$d МБ · Аптайм: %2$s · Потоки: %3$d</string>
     <string name="allow_background">Разрешить фоновую работу</string>
     <string name="background_hint">Важно: разрешите приложению работать в фоне без ограничений энергосбережения (кнопка ниже) и не выгружайте его из памяти — иначе система может остановить сервер.</string>
     <string name="log_label">Журнал</string>

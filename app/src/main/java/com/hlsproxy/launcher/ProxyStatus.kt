@@ -10,6 +10,9 @@ import kotlinx.coroutines.flow.StateFlow
 object ProxyStatus {
     enum class State { STOPPED, RUNNING }
 
+    /** Метрики работающего процесса. */
+    data class Stats(val ramKb: Long, val uptimeMs: Long, val streams: Int)
+
     // Журнал ограничен — хранится только последний хвост, без бесконечного роста.
     private const val MAX_LOG_LINES = 200
 
@@ -19,9 +22,21 @@ object ProxyStatus {
     private val _log = MutableStateFlow<List<String>>(emptyList())
     val log: StateFlow<List<String>> = _log
 
+    private val _stats = MutableStateFlow<Stats?>(null)
+    val stats: StateFlow<Stats?> = _stats
+
+    /** Время старта процесса (для аптайма). */
+    @Volatile var startTimeMs: Long = 0L
+
     fun setState(s: State) {
         _state.value = s
     }
+
+    fun setStats(s: Stats?) {
+        _stats.value = s
+    }
+
+    fun logSnapshot(): List<String> = _log.value
 
     @Synchronized
     fun appendLog(line: String) {

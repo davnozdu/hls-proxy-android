@@ -39,6 +39,7 @@ class ProxyService : Service() {
         private const val RESTART_WINDOW_MS = 120_000L
         private const val MAX_RESTARTS_IN_WINDOW = 5
         private const val RESTART_DELAY_MS = 5_000L
+        private const val STATS_INTERVAL_MS = 4_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -130,10 +131,12 @@ class ProxyService : Service() {
             val p = pb.start()
             process = p
             ProxyStatus.appendLog("Запуск: порт $port")
+            ProxyStatus.startTimeMs = System.currentTimeMillis()
             ProxyStatus.setState(ProxyStatus.State.RUNNING)
             acquireWakeLock()
             updateNotification()
             startReader(p)
+            startStatsUpdates()
         } catch (e: Exception) {
             ProxyStatus.appendLog("ОШИБКА запуска: ${e.message}")
             ProxyStatus.setState(ProxyStatus.State.STOPPED)
@@ -167,6 +170,8 @@ class ProxyService : Service() {
         // это завершение уже обработано вручную, ничего не делаем.
         if (process !== p) return
         process = null
+        stopStatsUpdates()
+        ProxyStatus.setStats(null)
         ProxyStatus.setState(ProxyStatus.State.STOPPED)
         ProxyStatus.appendLog("Процесс завершён (код $code)")
 
@@ -208,6 +213,7 @@ class ProxyService : Service() {
     @Synchronized
     private fun stopProxy(userInitiated: Boolean) {
         if (userInitiated) userStopped = true
+        stopStatsUpdates()
         cancelPendingRestart()
         val p = process
         process = null
@@ -230,6 +236,44 @@ class ProxyService : Service() {
     private fun cancelPendingRestart() {
         pendingRestart?.let { handler.removeCallbacks(it) }
         pendingRestart = null
+    }
+
+    // ---- Метрики (RAM / аптайм / потоки) ----
+
+    private val statsTick = object : Runnable {
+        override fun run() {
+            control.execute { updateStats() }
+            handler.postDelayed(this, STATS_INTERVAL_MS)
+        }
+    }
+
+    private fun startStatsUpdates() {
+        handler.removeCallbacks(statsTick)
+        handler.post(statsTick)
+    }
+
+    private fun stopStatsUpdates() {
+        handler.removeCallbacks(statsTick)
+    }
+
+    private fun updateStats() {
+        if (process?.isAlive != true) return
+        val pid = SysUtil.findPid(BIN_NAME)
+        val ramKb = SysUtil.readRssKb(pid)
+        val uptime = if (ProxyStatus.startTimeMs > 0) System.currentTimeMillis() - ProxyStatus.startTimeMs else 0
+        ProxyStatus.setStats(ProxyStatus.Stats(ramKb, uptime, countActiveStreams()))
+        updateNotification()
+    }
+
+    /** Приблизительное число активных потоков: уникальные ID каналов в свежем хвосте журнала. */
+    private fun countActiveStreams(): Int {
+        val tail = ProxyStatus.logSnapshot().takeLast(40)
+        val ids = HashSet<String>()
+        val re = Regex("""for stream .*\(([A-Za-z0-9]+)\)""")
+        for (line in tail) {
+            re.find(line)?.let { ids.add(it.groupValues[1]) }
+        }
+        return ids.size
     }
 
     // ---- Копирование ассетов в рабочую папку ----
@@ -320,7 +364,12 @@ class ProxyService : Service() {
         val ip = NetUtil.localIp(this) ?: "127.0.0.1"
         val port = Prefs.getPort(this)
         val running = ProxyStatus.state.value == ProxyStatus.State.RUNNING
-        val text = if (running) "http://$ip:$port" else getString(R.string.status_stopped)
+        val ramKb = ProxyStatus.stats.value?.ramKb ?: -1
+        val text = when {
+            running && ramKb > 0 -> "http://$ip:$port · RAM ${ramKb / 1024} МБ"
+            running -> "http://$ip:$port"
+            else -> getString(R.string.status_stopped)
+        }
 
         val contentIntent = PendingIntent.getActivity(
             this, 0,
