@@ -27,6 +27,8 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvStatus: TextView
     private lateinit var tvAddress: TextView
+    private lateinit var tvPlaylist: TextView
+    private lateinit var tvEpg: TextView
     private lateinit var tvLog: TextView
     private lateinit var etPort: EditText
     private lateinit var btnApplyPort: Button
@@ -45,6 +47,8 @@ class MainActivity : AppCompatActivity() {
 
         tvStatus = findViewById(R.id.tvStatus)
         tvAddress = findViewById(R.id.tvAddress)
+        tvPlaylist = findViewById(R.id.tvPlaylist)
+        tvEpg = findViewById(R.id.tvEpg)
         tvLog = findViewById(R.id.tvLog)
         etPort = findViewById(R.id.etPort)
         btnApplyPort = findViewById(R.id.btnApplyPort)
@@ -141,7 +145,17 @@ class MainActivity : AppCompatActivity() {
     private fun updateAddress(state: ProxyStatus.State) {
         val ip = NetUtil.localIp(this)
         val port = Prefs.getPort(this)
-        tvAddress.text = if (ip != null) "http://$ip:$port" else getString(R.string.address_none)
+        if (ip != null) {
+            val base = "http://$ip:$port"
+            tvAddress.text = "${getString(R.string.webui_label)}: $base"
+            tvPlaylist.text = "${getString(R.string.playlist_label)}: $base/playlist.m3u8"
+            tvEpg.text = "${getString(R.string.epg_label)}: $base/epg.xml.gz"
+        } else {
+            val none = getString(R.string.address_none)
+            tvAddress.text = "${getString(R.string.webui_label)}: $none"
+            tvPlaylist.text = "${getString(R.string.playlist_label)}: $none"
+            tvEpg.text = "${getString(R.string.epg_label)}: $none"
+        }
     }
 
     private fun requestRuntimePermissions() {

@@ -50,14 +50,32 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- Адрес -->
+        <!-- Адреса: веб-интерфейс, плейлист, EPG -->
         <TextView
             android:id="@+id/tvAddress"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/address_none"
+            android:textSize="17sp" />
+
+        <TextView
+            android:id="@+id/tvPlaylist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
+            android:text="@string/address_none"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tvEpg"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="2dp"
             android:paddingBottom="20dp"
             android:text="@string/address_none"
-            android:textSize="20sp" />
+            android:textSize="17sp" />
 
         <!-- Порт -->
         <LinearLayout

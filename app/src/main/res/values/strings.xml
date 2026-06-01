@@ -6,8 +6,10 @@
     <string name="status_running">Работает</string>
     <string name="status_stopped">Остановлен</string>
 
-    <string name="address_label">Адрес</string>
     <string name="address_none">—</string>
+    <string name="webui_label">Веб-интерфейс (настройка)</string>
+    <string name="playlist_label">Плейлист</string>
+    <string name="epg_label">Телепрограмма (EPG)</string>
 
     <string name="port_label">Порт</string>
     <string name="apply">Применить</string>

@@ -10,7 +10,8 @@ import kotlinx.coroutines.flow.StateFlow
 object ProxyStatus {
     enum class State { STOPPED, RUNNING }
 
-    private const val MAX_LOG_LINES = 300
+    // Журнал ограничен — хранится только последний хвост, без бесконечного роста.
+    private const val MAX_LOG_LINES = 200
 
     private val _state = MutableStateFlow(State.STOPPED)
     val state: StateFlow<State> = _state

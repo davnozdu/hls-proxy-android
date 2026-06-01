@@ -86,7 +86,7 @@ jobs:
       - name: Переименовать APK
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/debug/app-debug.apk "out/hls-proxy-${HLS_VERSION}-debug.apk"
+          cp app/build/outputs/apk/debug/app-debug.apk "out/hls-proxy-launcher-${HLS_VERSION}.apk"
 
       - uses: actions/upload-artifact@v4
         with:
