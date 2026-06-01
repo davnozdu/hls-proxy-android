@@ -15,8 +15,8 @@ android {
         // На API 29+ untrusted_app получает EACCES — и hls-proxy падает на старте.
         // Тот же приём использует Termux.
         targetSdk 28
-        versionCode 13
-        versionName "2.0.2"
+        versionCode 14
+        versionName "2.0.3"
 
         // Целевое устройство — 64-битные Android TV приставки / телефоны.
         ndk {
@@ -29,7 +29,9 @@ android {
             // Стабильный ключ (создаётся и коммитится в CI), чтобы обновления
             // ставились поверх без удаления и потери настроек. Если файла нет
             // (локальная сборка), AGP использует обычный ephemeral debug-ключ.
-            def ks = file('keystore/debug.keystore')
+            // ВАЖНО: keystore лежит в КОРНЕ репозитория, поэтому rootProject.file,
+            // а не file() (последний резолвится относительно модуля app/).
+            def ks = rootProject.file('keystore/debug.keystore')
             if (ks.exists()) {
                 storeFile ks
                 storePassword 'androiddebug'
