@@ -19,6 +19,9 @@
     <string name="restart">Перезапуск</string>
 
     <string name="autostart">Автозапуск при включении</string>
+    <string name="notify_status">Уведомлять о статусе и памяти (раз в день)</string>
+    <string name="notif_status_title">HLS Proxy — статус</string>
+    <string name="notif_status_format">Работает · RAM %1$d МБ · аптайм %2$s · потоки %3$d</string>
     <string name="share_playlist">Поделиться плейлистом</string>
     <string name="open_web">Открыть веб-интерфейс</string>
     <string name="qr_hint">QR плейлиста (наведите клиент/телефон)</string>

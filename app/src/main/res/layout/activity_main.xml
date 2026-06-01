@@ -232,6 +232,14 @@
             android:text="@string/autostart"
             android:textSize="18sp" />
 
+        <com.google.android.material.materialswitch.MaterialSwitch
+            android:id="@+id/swNotify"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingVertical="8dp"
+            android:text="@string/notify_status"
+            android:textSize="18sp" />
+
         <!-- Разрешить фоновую работу (отключить оптимизацию батареи) -->
         <Button
             android:id="@+id/btnBackground"

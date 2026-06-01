@@ -48,6 +48,8 @@ class ProxyService : Service() {
         private const val HEALTH_INTERVAL_MS = 30_000L
         private const val HEALTH_MAX_FAILS = 2
         private const val FAILED_NOTIF_ID = 2
+        private const val STATUS_NOTIF_ID = 3
+        private const val DAILY_NOTIF_MS = 24 * 60 * 60 * 1000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -279,13 +281,20 @@ class ProxyService : Service() {
         if (process?.isAlive != true) return
         val pid = SysUtil.findPid(BIN_NAME)
         val ramKb = SysUtil.readRssKb(pid)
-        val uptime = if (ProxyStatus.startTimeMs > 0) System.currentTimeMillis() - ProxyStatus.startTimeMs else 0
-        ProxyStatus.setStats(ProxyStatus.Stats(ramKb, uptime, countActiveStreams()))
-        updateNotification()
+        val now = System.currentTimeMillis()
+        val uptime = if (ProxyStatus.startTimeMs > 0) now - ProxyStatus.startTimeMs else 0
+        val stats = ProxyStatus.Stats(ramKb, uptime, countActiveStreams())
+        ProxyStatus.setStats(stats)
+        // Постоянное уведомление сервиса НЕ обновляем каждые 4 с — RAM смотрят в приложении.
+
+        // Тихое уведомление о статусе раз в день (если включено в настройках).
+        if (Prefs.isNotifyStatus(this) && now - Prefs.getLastDailyNotif(this) >= DAILY_NOTIF_MS) {
+            Prefs.setLastDailyNotif(this, now)
+            postDailyStatus(stats)
+        }
 
         // Watchdog: даём серверу время подняться, затем периодически проверяем ответ.
         // Проверка редкая (раз в 30 с), чтобы не засорять журнал прокси запросами с 127.0.0.1.
-        val now = System.currentTimeMillis()
         if (uptime > HEALTH_GRACE_MS && now - lastHealthMs >= HEALTH_INTERVAL_MS) {
             lastHealthMs = now
             if (healthOk(Prefs.getPort(this))) {
@@ -446,6 +455,30 @@ class ProxyService : Service() {
         nm.notify(FAILED_NOTIF_ID, n)
     }
 
+    private fun postDailyStatus(s: ProxyStatus.Stats) {
+        val nm = getSystemService(NotificationManager::class.java)
+        val ramMb = if (s.ramKb > 0) s.ramKb / 1024 else 0
+        val text = getString(R.string.notif_status_format, ramMb, formatUptime(s.uptimeMs), s.streams)
+        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.notif_status_title))
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setOnlyAlertOnce(true)
+            .setAutoCancel(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0, Intent(this, MainActivity::class.java), pendingFlags()
+                )
+            )
+            .build()
+        nm.notify(STATUS_NOTIF_ID, n)
+    }
+
+    private fun formatUptime(ms: Long): String {
+        val sec = ms / 1000
+        return String.format("%d:%02d:%02d", sec / 3600, (sec % 3600) / 60, sec % 60)
+    }
+
     // ---- WakeLock ----
 
     private fun acquireWakeLock() {
@@ -484,12 +517,8 @@ class ProxyService : Service() {
         val ip = NetUtil.localIp(this) ?: "127.0.0.1"
         val port = Prefs.getPort(this)
         val running = ProxyStatus.state.value == ProxyStatus.State.RUNNING
-        val ramKb = ProxyStatus.stats.value?.ramKb ?: -1
-        val text = when {
-            running && ramKb > 0 -> "http://$ip:$port · RAM ${ramKb / 1024} МБ"
-            running -> "http://$ip:$port"
-            else -> getString(R.string.status_stopped)
-        }
+        // Статичный текст (без частых обновлений): адрес или «остановлен».
+        val text = if (running) "http://$ip:$port" else getString(R.string.status_stopped)
 
         val contentIntent = PendingIntent.getActivity(
             this, 0,

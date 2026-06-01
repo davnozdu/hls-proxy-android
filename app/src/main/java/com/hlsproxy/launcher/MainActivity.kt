@@ -49,6 +49,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: Button
     private lateinit var btnRestart: Button
     private lateinit var swAutostart: MaterialSwitch
+    private lateinit var swNotify: MaterialSwitch
     private lateinit var btnBackground: Button
     private lateinit var tvStats: TextView
     private lateinit var ivQr: ImageView
@@ -79,6 +80,7 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btnStop)
         btnRestart = findViewById(R.id.btnRestart)
         swAutostart = findViewById(R.id.swAutostart)
+        swNotify = findViewById(R.id.swNotify)
         btnBackground = findViewById(R.id.btnBackground)
         tvStats = findViewById(R.id.tvStats)
         ivQr = findViewById(R.id.ivQr)
@@ -92,6 +94,7 @@ class MainActivity : AppCompatActivity() {
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
+        swNotify.isChecked = Prefs.isNotifyStatus(this)
 
         btnStart.setOnClickListener {
             Prefs.setUserStopped(this, false)
@@ -107,6 +110,11 @@ class MainActivity : AppCompatActivity() {
         }
         btnApplyPort.setOnClickListener { applyPort() }
         swAutostart.setOnCheckedChangeListener { _, checked -> Prefs.setAutostart(this, checked) }
+        swNotify.setOnCheckedChangeListener { _, checked ->
+            Prefs.setNotifyStatus(this, checked)
+            // Чтобы первое уведомление пришло не сразу, а через сутки после включения.
+            if (checked) Prefs.setLastDailyNotif(this, System.currentTimeMillis())
+        }
         btnBackground.setOnClickListener { openBatterySettings() }
         btnShare.setOnClickListener { sharePlaylist() }
         btnOpenWeb.setOnClickListener { openWebInterface() }

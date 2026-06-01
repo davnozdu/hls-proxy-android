@@ -19,4 +19,11 @@ object Prefs {
     /** Был ли сервис остановлен пользователем вручную (тогда не поднимаем его сами при открытии). */
     fun isUserStopped(c: Context): Boolean = sp(c).getBoolean("userStopped", false)
     fun setUserStopped(c: Context, value: Boolean) = sp(c).edit().putBoolean("userStopped", value).apply()
+
+    /** Слать тихое уведомление о статусе/RAM раз в день. По умолчанию выключено. */
+    fun isNotifyStatus(c: Context): Boolean = sp(c).getBoolean("notifyStatus", false)
+    fun setNotifyStatus(c: Context, value: Boolean) = sp(c).edit().putBoolean("notifyStatus", value).apply()
+
+    fun getLastDailyNotif(c: Context): Long = sp(c).getLong("lastDailyNotif", 0L)
+    fun setLastDailyNotif(c: Context, value: Long) = sp(c).edit().putLong("lastDailyNotif", value).apply()
 }
