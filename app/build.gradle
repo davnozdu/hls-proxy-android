@@ -1,0 +1,57 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.hlsproxy.launcher'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "com.hlsproxy.launcher"
+        minSdk 24
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        // Целевое устройство — 64-битные Android TV приставки / телефоны.
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Отладочный APK подписывается debug-ключом — ставится сайдлоадом без настройки секретов.
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    packaging {
+        jniLibs {
+            // Распаковывать нативные файлы на диск (нужно, чтобы бинарник
+            // оказался реальным файлом в nativeLibraryDir и его можно было запустить).
+            useLegacyPackaging = true
+            // Не стрипать наш исполняемый файл — это не обычная .so-библиотека.
+            keepDebugSymbols.add('**/libhlsproxy.so')
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core-ktx:1.13.1'
+    implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.8.4'
+    implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
+}

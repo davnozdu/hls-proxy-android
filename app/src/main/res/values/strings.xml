@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">HLS Proxy</string>
+
+    <string name="status_label">Статус</string>
+    <string name="status_running">Работает</string>
+    <string name="status_stopped">Остановлен</string>
+
+    <string name="address_label">Адрес</string>
+    <string name="address_none">—</string>
+
+    <string name="port_label">Порт</string>
+    <string name="apply">Применить</string>
+
+    <string name="start">Пуск</string>
+    <string name="stop">Стоп</string>
+    <string name="restart">Перезапуск</string>
+
+    <string name="autostart">Автозапуск при включении</string>
+    <string name="log_label">Журнал</string>
+
+    <string name="notif_channel_name">HLS Proxy</string>
+    <string name="notif_running">HLS Proxy работает</string>
+    <string name="notif_stop_action">Стоп</string>
+
+    <string name="port_invalid">Введите порт от 1024 до 65535</string>
+    <string name="port_saved">Порт сохранён</string>
+</resources>

@@ -1,0 +1,27 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+    <path
+        android:fillColor="#1565C0"
+        android:pathData="M8,4 L40,4 A4,4 0 0 1 44,8 L44,40 A4,4 0 0 1 40,44 L8,44 A4,4 0 0 1 4,40 L4,8 A4,4 0 0 1 8,4 z" />
+    <!-- Сигнал / поток -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M14,30 m-4,0 a4,4 0 1,0 8,0 a4,4 0 1,0 -8,0" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M20,28 A12,12 0 0 0 14,22" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:fillColor="#00000000"
+        android:pathData="M26,28 A18,18 0 0 0 14,16" />
+    <!-- Play -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M30,14 L40,20 L30,26 z" />
+</vector>

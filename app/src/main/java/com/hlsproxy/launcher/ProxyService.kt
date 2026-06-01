@@ -1,0 +1,355 @@
+package com.hlsproxy.launcher
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.os.Build
+import android.os.Handler
+import android.os.IBinder
+import android.os.Looper
+import android.os.PowerManager
+import androidx.core.app.NotificationCompat
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
+import java.util.concurrent.Executors
+
+/**
+ * Foreground-сервис: запускает встроенный бинарник hls-proxy и держит его живым.
+ * Бинарник лежит в nativeLibraryDir (единственное место, откуда Android разрешает
+ * исполнение), а рабочие файлы (конфиг, кэш) — в filesDir/hls.
+ */
+class ProxyService : Service() {
+
+    companion object {
+        const val ACTION_START = "com.hlsproxy.launcher.START"
+        const val ACTION_STOP = "com.hlsproxy.launcher.STOP"
+        const val ACTION_RESTART = "com.hlsproxy.launcher.RESTART"
+
+        private const val CHANNEL_ID = "hls_proxy"
+        private const val NOTIF_ID = 1
+        private const val BIN_NAME = "libhlsproxy.so"
+        private const val WORK_DIR = "hls"
+
+        // Защита от crash-loop: не более стольких автоперезапусков в окне.
+        private const val RESTART_WINDOW_MS = 120_000L
+        private const val MAX_RESTARTS_IN_WINDOW = 5
+        private const val RESTART_DELAY_MS = 5_000L
+    }
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val control = Executors.newSingleThreadExecutor()
+    private var process: Process? = null
+    private var readerThread: Thread? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    @Volatile private var userStopped = false
+    private val restartTimestamps = ArrayDeque<Long>()
+    private var pendingRestart: Runnable? = null
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createChannel()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // startForeground обязателен в течение 5 с после startForegroundService — делаем синхронно.
+        startForegroundNow()
+        when (intent?.action) {
+            ACTION_STOP -> {
+                control.execute {
+                    stopProxy(userInitiated = true)
+                    handler.post {
+                        stopForegroundCompat()
+                        stopSelf()
+                    }
+                }
+                return START_NOT_STICKY
+            }
+            ACTION_RESTART -> control.execute {
+                stopProxy(userInitiated = false)
+                startProxy()
+            }
+            else -> control.execute { startProxy() } // ACTION_START или повторная доставка
+        }
+        return START_STICKY
+    }
+
+    override fun onDestroy() {
+        control.execute { stopProxy(userInitiated = true) }
+        control.shutdown()
+        super.onDestroy()
+    }
+
+    // ---- Запуск / остановка процесса ----
+
+    @Synchronized
+    private fun startProxy() {
+        if (process?.isAlive == true) {
+            updateNotification()
+            return
+        }
+        userStopped = false
+        cancelPendingRestart()
+
+        val bin = File(applicationInfo.nativeLibraryDir, BIN_NAME)
+        if (!bin.exists()) {
+            ProxyStatus.appendLog("ОШИБКА: бинарник не найден: ${bin.absolutePath}")
+            ProxyStatus.setState(ProxyStatus.State.STOPPED)
+            return
+        }
+        bin.setExecutable(true)
+
+        val workDir = File(filesDir, WORK_DIR).apply { mkdirs() }
+        try {
+            copyAssets(workDir)
+        } catch (e: Exception) {
+            ProxyStatus.appendLog("ОШИБКА копирования конфигов: ${e.message}")
+        }
+        val tmpDir = File(workDir, "tmp").apply { mkdirs() }
+
+        val port = Prefs.getPort(this)
+        val cmd = listOf(bin.absolutePath, "-address", "0.0.0.0", "-port", port.toString())
+
+        try {
+            val pb = ProcessBuilder(cmd)
+            pb.directory(workDir)
+            pb.redirectErrorStream(true)
+            pb.environment()["HOME"] = workDir.absolutePath
+            pb.environment()["TMPDIR"] = tmpDir.absolutePath
+            val p = pb.start()
+            process = p
+            ProxyStatus.appendLog("Запуск: порт $port")
+            ProxyStatus.setState(ProxyStatus.State.RUNNING)
+            acquireWakeLock()
+            updateNotification()
+            startReader(p)
+        } catch (e: Exception) {
+            ProxyStatus.appendLog("ОШИБКА запуска: ${e.message}")
+            ProxyStatus.setState(ProxyStatus.State.STOPPED)
+            releaseWakeLock()
+        }
+    }
+
+    private fun startReader(p: Process) {
+        val t = Thread {
+            try {
+                BufferedReader(InputStreamReader(p.inputStream)).use { br ->
+                    var line: String?
+                    while (br.readLine().also { line = it } != null) {
+                        ProxyStatus.appendLog(line!!)
+                    }
+                }
+            } catch (_: Exception) {
+                // поток закрылся вместе с процессом
+            }
+            val code = try { p.waitFor() } catch (_: Exception) { -1 }
+            onProcessExited(p, code)
+        }
+        t.isDaemon = true
+        readerThread = t
+        t.start()
+    }
+
+    @Synchronized
+    private fun onProcessExited(p: Process, code: Int) {
+        // Если поле уже указывает на другой процесс (или null после Стоп/Перезапуск) —
+        // это завершение уже обработано вручную, ничего не делаем.
+        if (process !== p) return
+        process = null
+        ProxyStatus.setState(ProxyStatus.State.STOPPED)
+        ProxyStatus.appendLog("Процесс завершён (код $code)")
+
+        if (userStopped) {
+            releaseWakeLock()
+            handler.post {
+                stopForegroundCompat()
+                stopSelf()
+            }
+            return
+        }
+
+        // Непредвиденное завершение — пробуем перезапустить с защитой от петли.
+        val now = System.currentTimeMillis()
+        restartTimestamps.addLast(now)
+        while (restartTimestamps.isNotEmpty() && now - restartTimestamps.first() > RESTART_WINDOW_MS) {
+            restartTimestamps.removeFirst()
+        }
+        if (restartTimestamps.size > MAX_RESTARTS_IN_WINDOW) {
+            ProxyStatus.appendLog("Слишком много перезапусков — остановлено. Нажмите «Пуск».")
+            restartTimestamps.clear()
+            releaseWakeLock()
+            handler.post {
+                stopForegroundCompat()
+                stopSelf()
+            }
+            return
+        }
+        ProxyStatus.appendLog("Перезапуск через ${RESTART_DELAY_MS / 1000} с…")
+        val r = Runnable {
+            if (!userStopped && !control.isShutdown) {
+                control.execute { if (!userStopped) startProxy() }
+            }
+        }
+        pendingRestart = r
+        handler.postDelayed(r, RESTART_DELAY_MS)
+    }
+
+    @Synchronized
+    private fun stopProxy(userInitiated: Boolean) {
+        if (userInitiated) userStopped = true
+        cancelPendingRestart()
+        val p = process
+        process = null
+        if (p != null && p.isAlive) {
+            try {
+                p.destroy()
+                // дать SIGTERM время на корректное завершение
+                val deadline = System.currentTimeMillis() + 3000
+                while (p.isAlive && System.currentTimeMillis() < deadline) {
+                    Thread.sleep(50)
+                }
+                if (p.isAlive) p.destroyForcibly()
+            } catch (_: Exception) {
+            }
+        }
+        ProxyStatus.setState(ProxyStatus.State.STOPPED)
+        releaseWakeLock()
+    }
+
+    private fun cancelPendingRestart() {
+        pendingRestart?.let { handler.removeCallbacks(it) }
+        pendingRestart = null
+    }
+
+    // ---- Копирование ассетов в рабочую папку ----
+
+    /**
+     * Копирует встроенные default.json, groups.json, favicon.png, plugins/ рядом с бинарником.
+     * default.json и плагины перезаписываются (это ресурсы версии приложения),
+     * пользовательские файлы (local.json, groups.json, кэш) не трогаются.
+     */
+    private fun copyAssets(workDir: File) {
+        copyAssetTree("hls", workDir)
+    }
+
+    private fun copyAssetTree(assetPath: String, outDir: File) {
+        val entries = assets.list(assetPath) ?: return
+        if (entries.isEmpty()) return // не должно случиться для каталога
+        outDir.mkdirs()
+        for (name in entries) {
+            val childAsset = "$assetPath/$name"
+            val sub = assets.list(childAsset)
+            if (sub != null && sub.isNotEmpty()) {
+                copyAssetTree(childAsset, File(outDir, name))
+            } else {
+                val outFile = File(outDir, name)
+                val alwaysOverwrite = name == "default.json" || assetPath.contains("plugins")
+                if (outFile.exists() && !alwaysOverwrite) continue
+                assets.open(childAsset).use { input ->
+                    outFile.outputStream().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+    }
+
+    // ---- WakeLock ----
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HlsProxy::wakelock").apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        } catch (_: Exception) {
+        }
+        wakeLock = null
+    }
+
+    // ---- Уведомление ----
+
+    private fun createChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NotificationManager::class.java)
+            val ch = NotificationChannel(
+                CHANNEL_ID,
+                getString(R.string.notif_channel_name),
+                NotificationManager.IMPORTANCE_LOW
+            )
+            ch.setShowBadge(false)
+            nm.createNotificationChannel(ch)
+        }
+    }
+
+    private fun buildNotification(): Notification {
+        val ip = NetUtil.localIp() ?: "127.0.0.1"
+        val port = Prefs.getPort(this)
+        val running = ProxyStatus.state.value == ProxyStatus.State.RUNNING
+        val text = if (running) "http://$ip:$port" else getString(R.string.status_stopped)
+
+        val contentIntent = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java),
+            pendingFlags()
+        )
+        val stopIntent = PendingIntent.getService(
+            this, 1,
+            Intent(this, ProxyService::class.java).setAction(ACTION_STOP),
+            pendingFlags()
+        )
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.notif_running))
+            .setContentText(text)
+            .setSmallIcon(R.drawable.ic_notification)
+            .setOngoing(running)
+            .setOnlyAlertOnce(true)
+            .setContentIntent(contentIntent)
+            .addAction(0, getString(R.string.notif_stop_action), stopIntent)
+            .build()
+    }
+
+    private fun pendingFlags(): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        } else {
+            PendingIntent.FLAG_UPDATE_CURRENT
+        }
+    }
+
+    private fun startForegroundNow() {
+        val notif = buildNotification()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIF_ID, notif, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIF_ID, notif)
+        }
+    }
+
+    private fun updateNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm.notify(NOTIF_ID, buildNotification())
+    }
+
+    private fun stopForegroundCompat() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            stopForeground(STOP_FOREGROUND_REMOVE)
+        } else {
+            @Suppress("DEPRECATION")
+            stopForeground(true)
+        }
+    }
+}
