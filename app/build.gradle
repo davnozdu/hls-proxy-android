@@ -10,9 +10,13 @@ android {
     defaultConfig {
         applicationId "com.hlsproxy.launcher"
         minSdk 24
-        targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        // targetSdk 28: даёт приложению legacy SELinux-домен, в котором разрешено
+        // перечисление сетевых интерфейсов (os.networkInterfaces / getifaddrs).
+        // На API 29+ untrusted_app получает EACCES — и hls-proxy падает на старте.
+        // Тот же приём использует Termux.
+        targetSdk 28
+        versionCode 2
+        versionName "1.1"
 
         // Целевое устройство — 64-битные Android TV приставки / телефоны.
         ndk {
