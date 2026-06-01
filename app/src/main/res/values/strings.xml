@@ -17,6 +17,8 @@
     <string name="restart">Перезапуск</string>
 
     <string name="autostart">Автозапуск при включении</string>
+    <string name="allow_background">Разрешить фоновую работу</string>
+    <string name="background_hint">Важно: разрешите приложению работать в фоне без ограничений энергосбережения (кнопка ниже) и не выгружайте его из памяти — иначе система может остановить сервер.</string>
     <string name="log_label">Журнал</string>
 
     <string name="notif_channel_name">HLS Proxy</string>

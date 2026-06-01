@@ -34,6 +34,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnStop: Button
     private lateinit var btnRestart: Button
     private lateinit var swAutostart: MaterialSwitch
+    private lateinit var btnBackground: Button
 
     private val notifPermLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -51,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         btnStop = findViewById(R.id.btnStop)
         btnRestart = findViewById(R.id.btnRestart)
         swAutostart = findViewById(R.id.swAutostart)
+        btnBackground = findViewById(R.id.btnBackground)
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
@@ -60,6 +62,7 @@ class MainActivity : AppCompatActivity() {
         btnRestart.setOnClickListener { ProxyController.restart(this) }
         btnApplyPort.setOnClickListener { applyPort() }
         swAutostart.setOnCheckedChangeListener { _, checked -> Prefs.setAutostart(this, checked) }
+        btnBackground.setOnClickListener { openBatterySettings() }
 
         observeState()
         requestRuntimePermissions()
@@ -139,13 +142,27 @@ class MainActivity : AppCompatActivity() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         if (pm.isIgnoringBatteryOptimizations(packageName)) return
-        try {
-            startActivity(
+        openBatterySettings()
+    }
+
+    /** Открывает экран разрешения фоновой работы (несколько вариантов на случай разных прошивок). */
+    private fun openBatterySettings() {
+        val intents = listOfNotNull(
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
                 Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-                    .setData(Uri.parse("package:$packageName"))
-            )
-        } catch (_: Exception) {
-            // На некоторых Android TV прошивках экрана нет — не критично.
+                    .setData(Uri.parse("package:$packageName")) else null,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS) else null,
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                .setData(Uri.parse("package:$packageName"))
+        )
+        for (intent in intents) {
+            try {
+                startActivity(intent)
+                return
+            } catch (_: Exception) {
+                // пробуем следующий вариант
+            }
         }
     }
 }
