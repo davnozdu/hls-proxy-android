@@ -2,6 +2,8 @@ package com.hlsproxy.launcher
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -27,7 +29,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.materialswitch.MaterialSwitch
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : AppCompatActivity() {
 
@@ -48,6 +55,10 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvQrHint: TextView
     private lateinit var btnShare: Button
     private lateinit var btnOpenWeb: Button
+    private lateinit var tvUpdate: TextView
+    private lateinit var tvVersion: TextView
+    private lateinit var btnClearLog: Button
+    private lateinit var btnShareLog: Button
     private var lastQrUrl: String? = null
 
     private val notifPermLauncher =
@@ -74,6 +85,10 @@ class MainActivity : AppCompatActivity() {
         tvQrHint = findViewById(R.id.tvQrHint)
         btnShare = findViewById(R.id.btnShare)
         btnOpenWeb = findViewById(R.id.btnOpenWeb)
+        tvUpdate = findViewById(R.id.tvUpdate)
+        tvVersion = findViewById(R.id.tvVersion)
+        btnClearLog = findViewById(R.id.btnClearLog)
+        btnShareLog = findViewById(R.id.btnShareLog)
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
@@ -95,9 +110,17 @@ class MainActivity : AppCompatActivity() {
         btnBackground.setOnClickListener { openBatterySettings() }
         btnShare.setOnClickListener { sharePlaylist() }
         btnOpenWeb.setOnClickListener { openWebInterface() }
+        btnClearLog.setOnClickListener { ProxyStatus.clearLog() }
+        btnShareLog.setOnClickListener { shareLog() }
+        tvAddress.setOnClickListener { webUrl()?.let { copyToClipboard(it) } }
+        tvPlaylist.setOnClickListener { playlistUrl()?.let { copyToClipboard(it) } }
+        tvEpg.setOnClickListener { epgUrl()?.let { copyToClipboard(it) } }
+
+        tvVersion.text = getString(R.string.version_format, BuildConfig.VERSION_NAME, "8.4.8")
 
         observeState()
         requestRuntimePermissions()
+        checkForUpdate()
 
         btnStart.requestFocus()
     }
@@ -190,6 +213,79 @@ class MainActivity : AppCompatActivity() {
     private fun webUrl(): String? {
         val ip = NetUtil.localIp(this) ?: return null
         return "http://$ip:${Prefs.getPort(this)}"
+    }
+
+    private fun epgUrl(): String? {
+        val ip = NetUtil.localIp(this) ?: return null
+        return "http://$ip:${Prefs.getPort(this)}/epg.xml.gz"
+    }
+
+    private fun copyToClipboard(text: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("HLS Proxy", text))
+        Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareLog() {
+        val text = ProxyStatus.logSnapshot().joinToString("\n").ifEmpty { "—" }
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, text)
+        try {
+            startActivity(Intent.createChooser(send, getString(R.string.share_log)))
+        } catch (e: Exception) {
+            Toast.makeText(this, R.string.no_app, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun checkForUpdate() {
+        lifecycleScope.launch {
+            val info = withContext(Dispatchers.IO) { fetchLatestRelease() } ?: return@launch
+            val (tag, url) = info
+            if (isNewer(tag, BuildConfig.VERSION_NAME)) {
+                tvUpdate.text = getString(R.string.update_available, tag)
+                tvUpdate.visibility = View.VISIBLE
+                tvUpdate.setOnClickListener {
+                    try {
+                        startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    } catch (e: Exception) {
+                        Toast.makeText(this@MainActivity, R.string.no_app, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
+
+    private fun fetchLatestRelease(): Pair<String, String>? {
+        return try {
+            val c = URL("https://api.github.com/repos/davnozdu/hls-proxy-android/releases/latest")
+                .openConnection() as HttpURLConnection
+            c.connectTimeout = 5000
+            c.readTimeout = 5000
+            c.setRequestProperty("Accept", "application/vnd.github+json")
+            if (c.responseCode != 200) {
+                c.disconnect()
+                return null
+            }
+            val body = c.inputStream.bufferedReader().use { it.readText() }
+            c.disconnect()
+            val json = JSONObject(body)
+            val tag = json.optString("tag_name").trimStart('v')
+            val url = json.optString("html_url")
+            if (tag.isEmpty() || url.isEmpty()) null else tag to url
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun isNewer(remote: String, current: String): Boolean {
+        fun parts(s: String) = s.trimStart('v').split(".").map { it.toIntOrNull() ?: 0 }
+        val r = parts(remote)
+        val c = parts(current)
+        for (i in 0 until maxOf(r.size, c.size)) {
+            val rv = r.getOrElse(i) { 0 }
+            val cv = c.getOrElse(i) { 0 }
+            if (rv != cv) return rv > cv
+        }
+        return false
     }
 
     private fun renderStats(s: ProxyStatus.Stats?) {

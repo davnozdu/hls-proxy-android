@@ -27,6 +27,20 @@
             android:text="@string/background_hint"
             android:textSize="14sp" />
 
+        <!-- Баннер обновления (скрыт, пока нет новой версии) -->
+        <TextView
+            android:id="@+id/tvUpdate"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="#FFF3CD"
+            android:clickable="true"
+            android:focusable="true"
+            android:padding="10dp"
+            android:textColor="#664D03"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <!-- Статус -->
         <LinearLayout
             android:layout_width="match_parent"
@@ -64,7 +78,10 @@
             android:id="@+id/tvAddress"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="2dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingVertical="4dp"
             android:text="@string/address_none"
             android:textSize="17sp" />
 
@@ -72,7 +89,10 @@
             android:id="@+id/tvPlaylist"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="2dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingVertical="4dp"
             android:text="@string/address_none"
             android:textSize="17sp"
             android:textStyle="bold" />
@@ -81,10 +101,20 @@
             android:id="@+id/tvEpg"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingTop="2dp"
-            android:paddingBottom="12dp"
+            android:background="?android:attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:paddingVertical="4dp"
+            android:paddingBottom="8dp"
             android:text="@string/address_none"
             android:textSize="17sp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingBottom="12dp"
+            android:text="@string/copy_hint"
+            android:textSize="12sp" />
 
         <!-- QR плейлиста -->
         <ImageView
@@ -211,20 +241,51 @@
             android:text="@string/allow_background" />
 
         <!-- Журнал -->
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
             android:paddingTop="12dp"
-            android:paddingBottom="4dp"
-            android:text="@string/log_label"
-            android:textSize="18sp"
-            android:textStyle="bold" />
+            android:paddingBottom="4dp">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/log_label"
+                android:textSize="18sp"
+                android:textStyle="bold" />
+
+            <Button
+                android:id="@+id/btnClearLog"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:text="@string/clear_log" />
+
+            <Button
+                android:id="@+id/btnShareLog"
+                style="?attr/materialButtonOutlinedStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/share_log" />
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tvLog"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:fontFamily="monospace"
+            android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/tvVersion"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:paddingTop="16dp"
+            android:text=""
             android:textSize="12sp" />
     </LinearLayout>
 </ScrollView>

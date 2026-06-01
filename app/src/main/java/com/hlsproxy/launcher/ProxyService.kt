@@ -7,6 +7,8 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -16,6 +18,8 @@ import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.concurrent.Executors
 
 /**
@@ -40,6 +44,10 @@ class ProxyService : Service() {
         private const val MAX_RESTARTS_IN_WINDOW = 5
         private const val RESTART_DELAY_MS = 5_000L
         private const val STATS_INTERVAL_MS = 4_000L
+        private const val HEALTH_GRACE_MS = 15_000L
+        private const val HEALTH_INTERVAL_MS = 30_000L
+        private const val HEALTH_MAX_FAILS = 2
+        private const val FAILED_NOTIF_ID = 2
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -52,11 +60,17 @@ class ProxyService : Service() {
     private val restartTimestamps = ArrayDeque<Long>()
     private var pendingRestart: Runnable? = null
 
+    @Volatile private var lastBoundIp: String? = null
+    private var healthFails = 0
+    private var lastHealthMs = 0L
+    private var netCallbackRegistered = false
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         createChannel()
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -83,6 +97,7 @@ class ProxyService : Service() {
     }
 
     override fun onDestroy() {
+        unregisterNetworkCallback()
         control.execute { stopProxy(userInitiated = true) }
         control.shutdown()
         super.onDestroy()
@@ -127,7 +142,10 @@ class ProxyService : Service() {
             pb.environment()["TMPDIR"] = tmpDir.absolutePath
             // Бинарник пропатчен: networkInterfaces() берёт адрес отсюда
             // (Android запрещает перечисление интерфейсов внутри приложения).
-            pb.environment()["HLSPROXY_IP"] = NetUtil.localIp(this) ?: "127.0.0.1"
+            lastBoundIp = NetUtil.localIp(this)
+            healthFails = 0
+            lastHealthMs = 0
+            pb.environment()["HLSPROXY_IP"] = lastBoundIp ?: "127.0.0.1"
             val p = pb.start()
             process = p
             ProxyStatus.appendLog("Запуск: порт $port")
@@ -194,6 +212,7 @@ class ProxyService : Service() {
             ProxyStatus.appendLog("Слишком много перезапусков — остановлено. Нажмите «Пуск».")
             restartTimestamps.clear()
             releaseWakeLock()
+            notifyFailed()
             handler.post {
                 stopForegroundCompat()
                 stopSelf()
@@ -263,6 +282,45 @@ class ProxyService : Service() {
         val uptime = if (ProxyStatus.startTimeMs > 0) System.currentTimeMillis() - ProxyStatus.startTimeMs else 0
         ProxyStatus.setStats(ProxyStatus.Stats(ramKb, uptime, countActiveStreams()))
         updateNotification()
+
+        // Watchdog: даём серверу время подняться, затем периодически проверяем ответ.
+        // Проверка редкая (раз в 30 с), чтобы не засорять журнал прокси запросами с 127.0.0.1.
+        val now = System.currentTimeMillis()
+        if (uptime > HEALTH_GRACE_MS && now - lastHealthMs >= HEALTH_INTERVAL_MS) {
+            lastHealthMs = now
+            if (healthOk(Prefs.getPort(this))) {
+                healthFails = 0
+            } else {
+                healthFails++
+                if (healthFails >= HEALTH_MAX_FAILS) {
+                    ProxyStatus.appendLog("Сервер не отвечает — перезапуск")
+                    healthFails = 0
+                    restartProxyInternal()
+                }
+            }
+        }
+    }
+
+    /** Проверка живости: любой HTTP-ответ от сервера считается успехом. */
+    private fun healthOk(port: Int): Boolean {
+        return try {
+            val c = URL("http://127.0.0.1:$port/").openConnection() as HttpURLConnection
+            c.connectTimeout = 3000
+            c.readTimeout = 3000
+            c.requestMethod = "GET"
+            val code = c.responseCode
+            c.disconnect()
+            code > 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    @Synchronized
+    private fun restartProxyInternal() {
+        stopStatsUpdates()
+        stopProxy(userInitiated = false)
+        startProxy()
     }
 
     /** Приблизительное число активных потоков: уникальные ID каналов в свежем хвосте журнала. */
@@ -324,6 +382,68 @@ class ProxyService : Service() {
             "\"executable\": \"${ffmpeg.absolutePath}\""
         )
         if (replaced != text) cfg.writeText(replaced)
+    }
+
+    // ---- Реакция на смену сети/IP ----
+
+    private val netCheck = Runnable {
+        control.execute {
+            if (process?.isAlive == true && !userStopped) {
+                val ip = NetUtil.localIp(this)
+                if (ip != null && ip != lastBoundIp) {
+                    ProxyStatus.appendLog("Сменился IP: $lastBoundIp → $ip — перезапуск")
+                    restartProxyInternal()
+                }
+            }
+        }
+    }
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = scheduleNetCheck()
+        override fun onLost(network: Network) = scheduleNetCheck()
+        override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) =
+            scheduleNetCheck()
+    }
+
+    private fun scheduleNetCheck() {
+        handler.removeCallbacks(netCheck)
+        handler.postDelayed(netCheck, 2500)
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.registerDefaultNetworkCallback(networkCallback)
+            netCallbackRegistered = true
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        if (!netCallbackRegistered) return
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            cm.unregisterNetworkCallback(networkCallback)
+        } catch (_: Exception) {
+        }
+        netCallbackRegistered = false
+    }
+
+    private fun notifyFailed() {
+        val nm = getSystemService(NotificationManager::class.java)
+        val n = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.app_name))
+            .setContentText(getString(R.string.notif_failed))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(getString(R.string.notif_failed)))
+            .setSmallIcon(R.drawable.ic_notification)
+            .setAutoCancel(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 0, Intent(this, MainActivity::class.java), pendingFlags()
+                )
+            )
+            .build()
+        nm.notify(FAILED_NOTIF_ID, n)
     }
 
     // ---- WakeLock ----

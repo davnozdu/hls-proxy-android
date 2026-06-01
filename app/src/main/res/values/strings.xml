@@ -34,5 +34,12 @@
 
     <string name="port_invalid">Введите порт от 1024 до 65535</string>
     <string name="port_saved">Порт сохранён</string>
+    <string name="clear_log">Очистить</string>
+    <string name="share_log">Поделиться журналом</string>
+    <string name="copied">Скопировано</string>
+    <string name="copy_hint">(нажмите, чтобы скопировать)</string>
+    <string name="update_available">Доступна версия %1$s — нажмите, чтобы открыть страницу загрузки</string>
+    <string name="notif_failed">HLS Proxy остановлен после повторных сбоев. Откройте приложение.</string>
+    <string name="version_format">Приложение v%1$s · HLS Proxy %2$s</string>
     <string name="settings_unavailable">Не удалось открыть настройки. Откройте «О приложении» → «Батарея» вручную.</string>
 </resources>

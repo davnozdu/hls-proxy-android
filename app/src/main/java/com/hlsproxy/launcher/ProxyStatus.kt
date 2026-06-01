@@ -38,6 +38,10 @@ object ProxyStatus {
 
     fun logSnapshot(): List<String> = _log.value
 
+    fun clearLog() {
+        _log.value = emptyList()
+    }
+
     @Synchronized
     fun appendLog(line: String) {
         val cur = ArrayList(_log.value)

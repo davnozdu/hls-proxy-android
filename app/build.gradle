@@ -15,8 +15,8 @@ android {
         // На API 29+ untrusted_app получает EACCES — и hls-proxy падает на старте.
         // Тот же приём использует Termux.
         targetSdk 28
-        versionCode 8
-        versionName "1.7"
+        versionCode 9
+        versionName "1.8"
 
         // Целевое устройство — 64-битные Android TV приставки / телефоны.
         ndk {
@@ -54,6 +54,10 @@ android {
     }
     kotlinOptions {
         jvmTarget = '17'
+    }
+
+    buildFeatures {
+        buildConfig true
     }
 
     packaging {
