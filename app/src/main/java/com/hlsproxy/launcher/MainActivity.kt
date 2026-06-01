@@ -60,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvVersion: TextView
     private lateinit var btnClearLog: Button
     private lateinit var btnShareLog: Button
+    private lateinit var etPlaylist: EditText
+    private lateinit var etEpg: EditText
+    private lateinit var btnSaveSource: Button
     private var lastQrUrl: String? = null
 
     private val notifPermLauncher =
@@ -91,10 +94,17 @@ class MainActivity : AppCompatActivity() {
         tvVersion = findViewById(R.id.tvVersion)
         btnClearLog = findViewById(R.id.btnClearLog)
         btnShareLog = findViewById(R.id.btnShareLog)
+        etPlaylist = findViewById(R.id.etPlaylist)
+        etEpg = findViewById(R.id.etEpg)
+        btnSaveSource = findViewById(R.id.btnSaveSource)
 
         etPort.setText(Prefs.getPort(this).toString())
         swAutostart.isChecked = Prefs.isAutostart(this)
         swNotify.isChecked = Prefs.isNotifyStatus(this)
+
+        val (curPlaylist, curEpg) = ConfigStore.read(this)
+        etPlaylist.setText(curPlaylist)
+        etEpg.setText(curEpg)
 
         btnStart.setOnClickListener {
             Prefs.setUserStopped(this, false)
@@ -120,6 +130,7 @@ class MainActivity : AppCompatActivity() {
         btnOpenWeb.setOnClickListener { openWebInterface() }
         btnClearLog.setOnClickListener { ProxyStatus.clearLog() }
         btnShareLog.setOnClickListener { shareLog() }
+        btnSaveSource.setOnClickListener { saveSource() }
         tvAddress.setOnClickListener { webUrl()?.let { copyToClipboard(it) } }
         tvPlaylist.setOnClickListener { playlistUrl()?.let { copyToClipboard(it) } }
         tvEpg.setOnClickListener { epgUrl()?.let { copyToClipboard(it) } }
@@ -232,6 +243,14 @@ class MainActivity : AppCompatActivity() {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText("HLS Proxy", text))
         Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun saveSource() {
+        ConfigStore.save(this, etPlaylist.text.toString(), etEpg.text.toString())
+        Toast.makeText(this, R.string.source_saved, Toast.LENGTH_SHORT).show()
+        // Применяем: снимаем флаг ручной остановки и перезапускаем прокси.
+        Prefs.setUserStopped(this, false)
+        ProxyController.restart(this)
     }
 
     private fun shareLog() {
