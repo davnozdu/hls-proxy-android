@@ -118,7 +118,7 @@ class MainActivity : AppCompatActivity() {
 
     @SuppressLint("SetTextI18n")
     private fun updateAddress(state: ProxyStatus.State) {
-        val ip = NetUtil.localIp()
+        val ip = NetUtil.localIp(this)
         val port = Prefs.getPort(this)
         tvAddress.text = if (ip != null) "http://$ip:$port" else getString(R.string.address_none)
     }

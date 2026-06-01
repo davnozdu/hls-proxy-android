@@ -123,6 +123,9 @@ class ProxyService : Service() {
             pb.redirectErrorStream(true)
             pb.environment()["HOME"] = workDir.absolutePath
             pb.environment()["TMPDIR"] = tmpDir.absolutePath
+            // Бинарник пропатчен: networkInterfaces() берёт адрес отсюда
+            // (Android запрещает перечисление интерфейсов внутри приложения).
+            pb.environment()["HLSPROXY_IP"] = NetUtil.localIp(this) ?: "127.0.0.1"
             val p = pb.start()
             process = p
             ProxyStatus.appendLog("Запуск: порт $port")
@@ -294,7 +297,7 @@ class ProxyService : Service() {
     }
 
     private fun buildNotification(): Notification {
-        val ip = NetUtil.localIp() ?: "127.0.0.1"
+        val ip = NetUtil.localIp(this) ?: "127.0.0.1"
         val port = Prefs.getPort(this)
         val running = ProxyStatus.state.value == ProxyStatus.State.RUNNING
         val text = if (running) "http://$ip:$port" else getString(R.string.status_stopped)
