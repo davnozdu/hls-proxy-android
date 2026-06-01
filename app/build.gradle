@@ -15,8 +15,8 @@ android {
         // На API 29+ untrusted_app получает EACCES — и hls-proxy падает на старте.
         // Тот же приём использует Termux.
         targetSdk 28
-        versionCode 3
-        versionName "1.2"
+        versionCode 4
+        versionName "1.3"
 
         // Целевое устройство — 64-битные Android TV приставки / телефоны.
         ndk {
@@ -24,9 +24,24 @@ android {
         }
     }
 
+    signingConfigs {
+        debug {
+            // Стабильный ключ (создаётся и коммитится в CI), чтобы обновления
+            // ставились поверх без удаления и потери настроек. Если файла нет
+            // (локальная сборка), AGP использует обычный ephemeral debug-ключ.
+            def ks = file('keystore/debug.keystore')
+            if (ks.exists()) {
+                storeFile ks
+                storePassword 'androiddebug'
+                keyAlias 'hlsproxy'
+                keyPassword 'androiddebug'
+            }
+        }
+    }
+
     buildTypes {
         debug {
-            // Отладочный APK подписывается debug-ключом — ставится сайдлоадом без настройки секретов.
+            signingConfig signingConfigs.debug
         }
         release {
             minifyEnabled false
@@ -46,8 +61,9 @@ android {
             // Распаковывать нативные файлы на диск (нужно, чтобы бинарник
             // оказался реальным файлом в nativeLibraryDir и его можно было запустить).
             useLegacyPackaging = true
-            // Не стрипать наш исполняемый файл — это не обычная .so-библиотека.
+            // Не стрипать наши исполняемые файлы — это не обычные .so-библиотеки.
             keepDebugSymbols.add('**/libhlsproxy.so')
+            keepDebugSymbols.add('**/libffmpeg.so')
         }
     }
 }

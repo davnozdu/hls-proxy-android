@@ -109,8 +109,9 @@ class ProxyService : Service() {
         val workDir = File(filesDir, WORK_DIR).apply { mkdirs() }
         try {
             copyAssets(workDir)
+            configureFfmpeg(workDir)
         } catch (e: Exception) {
-            ProxyStatus.appendLog("ОШИБКА копирования конфигов: ${e.message}")
+            ProxyStatus.appendLog("ОШИБКА подготовки конфигов: ${e.message}")
         }
         val tmpDir = File(workDir, "tmp").apply { mkdirs() }
 
@@ -260,6 +261,25 @@ class ProxyService : Service() {
                 }
             }
         }
+    }
+
+    /**
+     * Прописывает в default.json абсолютный путь к встроенному ffmpeg
+     * (lib-файл в nativeLibraryDir — единственное место, откуда разрешён запуск).
+     * Включённый по умолчанию remux (-c copy) теперь работает; путь динамический,
+     * поэтому подставляется при каждом старте.
+     */
+    private fun configureFfmpeg(workDir: File) {
+        val ffmpeg = File(applicationInfo.nativeLibraryDir, "libffmpeg.so")
+        File(workDir, "ffmpeg").mkdirs()
+        val cfg = File(workDir, "default.json")
+        if (!ffmpeg.exists() || !cfg.exists()) return
+        val text = cfg.readText()
+        val replaced = text.replace(
+            "\"executable\": \"ffmpeg\"",
+            "\"executable\": \"${ffmpeg.absolutePath}\""
+        )
+        if (replaced != text) cfg.writeText(replaced)
     }
 
     // ---- WakeLock ----
