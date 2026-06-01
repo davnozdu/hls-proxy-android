@@ -24,6 +24,7 @@
         android:roundIcon="@drawable/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.HlsProxy"
+        android:usesCleartextTraffic="true"
         tools:targetApi="34">
 
         <activity
