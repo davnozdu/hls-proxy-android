@@ -15,6 +15,10 @@ env:
   HLS_SHA256: "79d4f631859ecbac49d4d67226316bffe62a0d29d77015b0e63b5a66fc479da3"
   FFMPEG_URL: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-arm64"
   FFMPEG_SHA256: "237800b37bb65a81ad47871c6c8b7c45c0a3ca62a5b3f9d2a7a9a2dd9a338271"
+  HLS_ARMV7_URL: "https://www.hls-proxy.com/downloads/8.4.8/hls-proxy-8.4.8.linux-armv7.zip"
+  HLS_ARMV7_SHA256: "f65727596a6b5b989278f00b73c16b91e70892a32afc253e5d0cebb50b778606"
+  FFMPEG_ARM_URL: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-arm"
+  FFMPEG_ARM_SHA256: "1a9ddc19d0e071b6e1ff6f8f34dc05ec6dd4d8f3e79a649f5a9ec0e8c929c4cb"
 
 jobs:
   build:
@@ -22,35 +26,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Скачать и встроить hls-proxy (arm64)
+      - name: Скачать и встроить hls-proxy + ffmpeg (arm64 и armv7)
         run: |
           set -euo pipefail
-          curl -fL -o hls.zip "$HLS_URL"
-          echo "$HLS_SHA256  hls.zip" | sha256sum -c -
-          rm -rf extract && mkdir extract
-          unzip -oq hls.zip -d extract
 
+          # --- arm64 ---
+          curl -fL -o hls64.zip "$HLS_URL"
+          echo "$HLS_SHA256  hls64.zip" | sha256sum -c -
+          rm -rf ex64 && mkdir ex64 && unzip -oq hls64.zip -d ex64
           # Патч: убрать перечисление сетевых интерфейсов (EACCES на Android untrusted_app)
-          python3 patch-binary.py extract/hls-proxy
-
-          # Бинарник -> jniLibs (распакуется в nativeLibraryDir, откуда разрешён запуск)
+          python3 patch-binary.py ex64/hls-proxy
           mkdir -p app/src/main/jniLibs/arm64-v8a
-          cp extract/hls-proxy app/src/main/jniLibs/arm64-v8a/libhlsproxy.so
+          cp ex64/hls-proxy app/src/main/jniLibs/arm64-v8a/libhlsproxy.so
+          curl -fL -o ffmpeg64 "$FFMPEG_URL"
+          echo "$FFMPEG_SHA256  ffmpeg64" | sha256sum -c -
+          cp ffmpeg64 app/src/main/jniLibs/arm64-v8a/libffmpeg.so
 
-          # ffmpeg (статический arm64) для remux -> jniLibs
-          curl -fL -o ffmpeg "$FFMPEG_URL"
-          echo "$FFMPEG_SHA256  ffmpeg" | sha256sum -c -
-          cp ffmpeg app/src/main/jniLibs/arm64-v8a/libffmpeg.so
+          # --- armv7 (32-битные приставки, напр. Mi TV) ---
+          curl -fL -o hls7.zip "$HLS_ARMV7_URL"
+          echo "$HLS_ARMV7_SHA256  hls7.zip" | sha256sum -c -
+          rm -rf ex7 && mkdir ex7 && unzip -oq hls7.zip -d ex7
+          python3 patch-binary.py ex7/hls-proxy
+          mkdir -p app/src/main/jniLibs/armeabi-v7a
+          cp ex7/hls-proxy app/src/main/jniLibs/armeabi-v7a/libhlsproxy.so
+          curl -fL -o ffmpeg7 "$FFMPEG_ARM_URL"
+          echo "$FFMPEG_ARM_SHA256  ffmpeg7" | sha256sum -c -
+          cp ffmpeg7 app/src/main/jniLibs/armeabi-v7a/libffmpeg.so
 
-          # Конфиги и плагины -> assets (копируются в рабочую папку при первом запуске)
+          # --- Конфиги и плагины (не зависят от архитектуры) -> assets ---
           mkdir -p app/src/main/assets/hls/plugins
-          cp extract/default.json  app/src/main/assets/hls/
-          cp extract/groups.json   app/src/main/assets/hls/ || true
-          cp extract/favicon.png   app/src/main/assets/hls/ || true
-          cp -r extract/plugins/.  app/src/main/assets/hls/plugins/
+          cp ex64/default.json  app/src/main/assets/hls/
+          cp ex64/groups.json   app/src/main/assets/hls/ || true
+          cp ex64/favicon.png   app/src/main/assets/hls/ || true
+          cp -r ex64/plugins/.  app/src/main/assets/hls/plugins/
 
-          echo "--- jniLibs ---"; ls -la app/src/main/jniLibs/arm64-v8a
-          echo "--- assets ---";  ls -la app/src/main/assets/hls
+          echo "--- arm64-v8a ---";   ls -la app/src/main/jniLibs/arm64-v8a
+          echo "--- armeabi-v7a ---"; ls -la app/src/main/jniLibs/armeabi-v7a
+          echo "--- assets ---";      ls -la app/src/main/assets/hls
 
       - uses: actions/setup-java@v4
         with:
