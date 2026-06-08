@@ -19,6 +19,11 @@ env:
   HLS_ARMV7_SHA256: "f65727596a6b5b989278f00b73c16b91e70892a32afc253e5d0cebb50b778606"
   FFMPEG_ARM_URL: "https://github.com/eugeneware/ffmpeg-static/releases/download/b6.0/ffmpeg-linux-arm"
   FFMPEG_ARM_SHA256: "1a9ddc19d0e071b6e1ff6f8f34dc05ec6dd4d8f3e79a649f5a9ec0e8c929c4cb"
+  # proot (статический) — виртуальный /etc/resolv.conf, чтобы Node резолвил DNS.
+  PROOT_ARM64_URL: "https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-aarch64-static"
+  PROOT_ARM64_SHA256: "fa10b1a7818c2f5b1dcb5834450570c368c9ecf66d31521509621b95c4538a45"
+  PROOT_ARMV7_URL: "https://github.com/proot-me/proot/releases/download/v5.3.0/proot-v5.3.0-arm-static"
+  PROOT_ARMV7_SHA256: "bf186a37c7a19621e5bf3cfdf6bce54bfa2e220f91eb7196318e699ac174cc69"
 
 jobs:
   build:
@@ -41,6 +46,9 @@ jobs:
           curl -fL -o ffmpeg64 "$FFMPEG_URL"
           echo "$FFMPEG_SHA256  ffmpeg64" | sha256sum -c -
           cp ffmpeg64 app/src/main/jniLibs/arm64-v8a/libffmpeg.so
+          curl -fL -o proot64 "$PROOT_ARM64_URL"
+          echo "$PROOT_ARM64_SHA256  proot64" | sha256sum -c -
+          cp proot64 app/src/main/jniLibs/arm64-v8a/libproot.so
 
           # --- armv7 (32-битные приставки, напр. Mi TV) ---
           curl -fL -o hls7.zip "$HLS_ARMV7_URL"
@@ -52,6 +60,9 @@ jobs:
           curl -fL -o ffmpeg7 "$FFMPEG_ARM_URL"
           echo "$FFMPEG_ARM_SHA256  ffmpeg7" | sha256sum -c -
           cp ffmpeg7 app/src/main/jniLibs/armeabi-v7a/libffmpeg.so
+          curl -fL -o proot7 "$PROOT_ARMV7_URL"
+          echo "$PROOT_ARMV7_SHA256  proot7" | sha256sum -c -
+          cp proot7 app/src/main/jniLibs/armeabi-v7a/libproot.so
 
           # --- Конфиги и плагины (не зависят от архитектуры) -> assets ---
           mkdir -p app/src/main/assets/hls/plugins

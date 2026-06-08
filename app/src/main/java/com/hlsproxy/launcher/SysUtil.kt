@@ -11,8 +11,11 @@ object SysUtil {
         for (d in entries) {
             val pid = d.name.toIntOrNull() ?: continue
             try {
-                val cmd = File(d, "cmdline").readText()
-                if (cmd.contains(binName)) return pid
+                // cmdline — это argv через NUL. Сверяем именно argv[0]: у самого
+                // hls-proxy он = .../libhlsproxy.so, а у proot-обёртки argv[0] =
+                // .../libproot.so (бинарь там лишь аргумент) — так не путаем их.
+                val argv0 = File(d, "cmdline").readText().substringBefore('\u0000')
+                if (argv0.contains(binName)) return pid
             } catch (_: Exception) {
                 // /proc может меняться на лету — пропускаем
             }
