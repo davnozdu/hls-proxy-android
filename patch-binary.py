@@ -52,8 +52,25 @@ def main(path: str) -> int:
 
     # Дополняем пробелами до исходной длины (размер файла не меняется — важно для pkg).
     data[start:end] = NEW + b" " * (region_len - len(NEW))
+
+    # --- Патч пути resolv.conf ---
+    # Бинарник статический (glibc/c-ares), путь к DNS-конфигу зашит как
+    # "/etc/resolv.conf". На Android этого файла нет → getaddrinfo падает с
+    # EAI_AGAIN и DNS не резолвится. Меняем абсолютный путь на относительный
+    # "resolv.conf" (та же длина), и приложение кладёт resolv.conf в рабочий
+    # каталог (cwd процесса), откуда glibc его и читает.
+    OLD_RC = b"/etc/resolv.conf\x00"            # 17 байт (с NUL)
+    NEW_RC = b"resolv.conf\x00\x00\x00\x00\x00\x00"  # тоже 17 байт
+    rc_count = data.count(OLD_RC)
+    if rc_count == 0:
+        print("ОШИБКА: строка /etc/resolv.conf не найдена — патч DNS не применён.",
+              file=sys.stderr)
+        return 1
+    data[:] = data.replace(OLD_RC, NEW_RC)
+
     open(path, "wb").write(data)
-    print(f"OK: networkInterfaces() пропатчена (регион {region_len} б, размер файла сохранён).")
+    print(f"OK: networkInterfaces() пропатчена (регион {region_len} б), "
+          f"resolv.conf → относительный путь ({rc_count} вхождений). Размер файла сохранён.")
     return 0
 
 

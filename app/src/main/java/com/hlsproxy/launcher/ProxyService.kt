@@ -37,12 +37,10 @@ class ProxyService : Service() {
         private const val CHANNEL_ID = "hls_proxy"
         private const val NOTIF_ID = 1
         private const val BIN_NAME = "libhlsproxy.so"
-        // proot (ptrace-chroot) — подсовываем виртуальный /etc/resolv.conf,
-        // которого на Android нет. Без него статический Node (glibc) не может
-        // резолвить DNS (getaddrinfo EAI_AGAIN) и плейлисты не загружаются.
-        private const val BIN_PROOT = "libproot.so"
         private const val WORK_DIR = "hls"
-        // Публичные DNS-серверы для виртуального resolv.conf.
+        // resolv.conf с публичными DNS — кладётся в рабочий каталог, т.к. бинарник
+        // пропатчен на относительный путь "resolv.conf" (на Android нет
+        // /etc/resolv.conf, без него getaddrinfo падает с EAI_AGAIN).
         private const val RESOLV_CONTENT = "nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\n"
 
         // Защита от crash-loop: не более стольких автоперезапусков в окне.
@@ -140,30 +138,16 @@ class ProxyService : Service() {
         val tmpDir = File(workDir, "tmp").apply { mkdirs() }
 
         val port = Prefs.getPort(this)
-        val hlsArgs = listOf(bin.absolutePath, "-address", "0.0.0.0", "-port", port.toString())
+        val cmd = listOf(bin.absolutePath, "-address", "0.0.0.0", "-port", port.toString())
 
-        // Запускаем под proot, чтобы виртуально смонтировать /etc/resolv.conf
-        // (иначе статический Node не резолвит DNS — EAI_AGAIN). Если proot
-        // почему-то отсутствует, откатываемся на прямой запуск.
-        val proot = File(applicationInfo.nativeLibraryDir, BIN_PROOT)
-        val prootTmp = File(workDir, "ptmp").apply { mkdirs() }
-        val resolvConf = File(workDir, "resolv.conf")
-        val cmd: List<String>
-        if (proot.exists()) {
-            proot.setExecutable(true)
-            try {
-                resolvConf.writeText(RESOLV_CONTENT)
-            } catch (e: Exception) {
-                ProxyStatus.appendLog("ОШИБКА записи resolv.conf: ${e.message}")
-            }
-            cmd = listOf(
-                proot.absolutePath,
-                "--kill-on-exit",
-                "-b", "${resolvConf.absolutePath}:/etc/resolv.conf"
-            ) + hlsArgs
-        } else {
-            ProxyStatus.appendLog("ВНИМАНИЕ: proot не найден, запуск без фикса DNS")
-            cmd = hlsArgs
+        // Фикс DNS: бинарник пропатчен так, что путь к DNS-конфигу — относительный
+        // "resolv.conf" (на Android нет /etc/resolv.conf, из-за чего getaddrinfo
+        // падал с EAI_AGAIN). Кладём его в рабочий каталог (cwd процесса) с
+        // публичными DNS, чтобы glibc-резолвер увидел серверы имён.
+        try {
+            File(workDir, "resolv.conf").writeText(RESOLV_CONTENT)
+        } catch (e: Exception) {
+            ProxyStatus.appendLog("ОШИБКА записи resolv.conf: ${e.message}")
         }
 
         try {
@@ -172,10 +156,6 @@ class ProxyService : Service() {
             pb.redirectErrorStream(true)
             pb.environment()["HOME"] = workDir.absolutePath
             pb.environment()["TMPDIR"] = tmpDir.absolutePath
-            // proot: каталог для распаковки служебного загрузчика и отключение
-            // seccomp (фильтр Android несовместим с ptrace-перехватом proot).
-            pb.environment()["PROOT_TMP_DIR"] = prootTmp.absolutePath
-            pb.environment()["PROOT_NO_SECCOMP"] = "1"
             // Бинарник пропатчен: networkInterfaces() берёт адрес отсюда
             // (Android запрещает перечисление интерфейсов внутри приложения).
             lastBoundIp = NetUtil.localIp(this)
@@ -200,22 +180,15 @@ class ProxyService : Service() {
 
     private fun startReader(p: Process) {
         val t = Thread {
-            // Диагностика: дублируем вывод дочернего процесса (proot + hls-proxy)
-            // в файл, чтобы можно было прочитать его через adb/run-as.
-            val logFile = File(File(filesDir, WORK_DIR), "proxy.log")
-            val fw = try { logFile.bufferedWriter() } catch (_: Exception) { null }
             try {
                 BufferedReader(InputStreamReader(p.inputStream)).use { br ->
                     var line: String?
                     while (br.readLine().also { line = it } != null) {
                         ProxyStatus.appendLog(line!!)
-                        try { fw?.appendLine(line!!); fw?.flush() } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {
                 // поток закрылся вместе с процессом
-            } finally {
-                try { fw?.close() } catch (_: Exception) {}
             }
             val code = try { p.waitFor() } catch (_: Exception) { -1 }
             onProcessExited(p, code)
