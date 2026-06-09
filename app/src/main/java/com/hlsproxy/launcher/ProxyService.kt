@@ -498,7 +498,16 @@ class ProxyService : Service() {
      * пользовательские файлы (local.json, groups.json, кэш) не трогаются.
      */
     private fun copyAssets(workDir: File) {
+        // Распаковываем ассеты (default.json/плагины) из APK не каждый старт, а лишь
+        // когда сменилась установка (nativeLibraryDir) или рабочей папки ещё нет.
+        // Это убирает лишний дисковый IO при каждом запуске/перезапуске и сохраняет
+        // правки настроек в default.json между перезапусками. При обновлении/
+        // переустановке путь к ffmpeg меняется — тогда ассеты и освежаются (после
+        // чего configureFfmpeg заново пропишет актуальный путь).
+        val stamp = applicationInfo.nativeLibraryDir ?: ""
+        if (Prefs.getAssetsStamp(this) == stamp && File(workDir, "default.json").exists()) return
         copyAssetTree("hls", workDir)
+        Prefs.setAssetsStamp(this, stamp)
     }
 
     private fun copyAssetTree(assetPath: String, outDir: File) {

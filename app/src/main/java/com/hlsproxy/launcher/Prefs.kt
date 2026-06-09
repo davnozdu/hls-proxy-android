@@ -26,4 +26,12 @@ object Prefs {
 
     fun getLastDailyNotif(c: Context): Long = sp(c).getLong("lastDailyNotif", 0L)
     fun setLastDailyNotif(c: Context, value: Long) = sp(c).edit().putLong("lastDailyNotif", value).apply()
+
+    /**
+     * Метка установки (nativeLibraryDir), для которой ассеты (default.json/плагины)
+     * уже распакованы. Меняется при обновлении/переустановке — тогда же меняется
+     * путь к ffmpeg, поэтому default.json надо освежить.
+     */
+    fun getAssetsStamp(c: Context): String? = sp(c).getString("assetsStamp", null)
+    fun setAssetsStamp(c: Context, value: String) = sp(c).edit().putString("assetsStamp", value).apply()
 }
