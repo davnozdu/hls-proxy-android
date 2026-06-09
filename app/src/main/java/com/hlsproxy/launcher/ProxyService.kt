@@ -20,8 +20,6 @@ import androidx.core.app.NotificationCompat
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.concurrent.Executors
 
 /**
@@ -441,16 +439,22 @@ class ProxyService : Service() {
         }
     }
 
-    /** Проверка живости: любой HTTP-ответ от сервера считается успехом. */
+    /**
+     * Проверка живости: сервер слушает свой порт (TCP-коннект к 127.0.0.1:port).
+     * НЕ делаем HTTP GET «/»: эта страница на старте долго строит плейлист + EPG
+     * (тысячи каналов), GET таймаутил и watchdog ложно перезапускал прокси прямо
+     * во время начальной загрузки (~через минуту после boot), не давая ей
+     * завершиться. hls-proxy слушает порт сразу (ещё до загрузки плейлистов),
+     * поэтому успешный TCP-коннект надёжно подтверждает, что процесс жив и не
+     * завис, не дожидаясь готовности контента. Реальную смерть процесса ловит
+     * onProcessExited.
+     */
     private fun healthOk(port: Int): Boolean {
         return try {
-            val c = URL("http://127.0.0.1:$port/").openConnection() as HttpURLConnection
-            c.connectTimeout = 3000
-            c.readTimeout = 3000
-            c.requestMethod = "GET"
-            val code = c.responseCode
-            c.disconnect()
-            code > 0
+            java.net.Socket().use {
+                it.connect(java.net.InetSocketAddress("127.0.0.1", port), 3000)
+                true
+            }
         } catch (e: Exception) {
             false
         }
