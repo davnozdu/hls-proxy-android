@@ -1,5 +1,6 @@
 package com.hlsproxy.launcher
 
+import android.app.ActivityManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -34,6 +35,7 @@ class ProxyService : Service() {
         const val ACTION_START = "com.hlsproxy.launcher.START"
         const val ACTION_STOP = "com.hlsproxy.launcher.STOP"
         const val ACTION_RESTART = "com.hlsproxy.launcher.RESTART"
+        const val EXTRA_FROM_BOOT = "from_boot"
 
         private const val CHANNEL_ID = "hls_proxy"
         private const val NOTIF_ID = 1
@@ -58,8 +60,12 @@ class ProxyService : Service() {
 
         // Ожидание готовности сети перед стартом (актуально после перезагрузки:
         // сеть на ТВ-боксах поднимается с задержкой, и плейлист иначе не качается).
-        private const val NET_POLL_MS = 3_000L          // как часто перепроверять сеть
-        private const val NET_WAIT_MAX_MS = 120_000L    // через сколько стартовать всё равно
+        private const val NET_POLL_MS = 3_000L          // как часто перепроверять условия
+        private const val NET_WAIT_MAX_MS = 180_000L    // через сколько стартовать всё равно
+        // Автозапуск после загрузки: не стартуем в разгар «шторма» сервисов на boot
+        // (резкий расход ОЗУ на 2 ГБ → падение). Ждём минимальную паузу и пока
+        // система не освободит память.
+        private const val MIN_BOOT_SETTLE_MS = 25_000L
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -72,6 +78,7 @@ class ProxyService : Service() {
     private val restartTimestamps = ArrayDeque<Long>()
     private var pendingRestart: Runnable? = null
     @Volatile private var waitingForNet = false
+    @Volatile private var startFromBoot = false
     private var netWaitStartMs = 0L
 
     @Volatile private var lastBoundIp: String? = null
@@ -105,7 +112,10 @@ class ProxyService : Service() {
                 stopProxy(userInitiated = false)
                 startProxy()
             }
-            else -> control.execute { requestStart() } // ACTION_START или повторная доставка
+            else -> { // ACTION_START или повторная доставка
+                if (intent?.getBooleanExtra(EXTRA_FROM_BOOT, false) == true) startFromBoot = true
+                control.execute { requestStart() }
+            }
         }
         return START_STICKY
     }
@@ -133,27 +143,55 @@ class ProxyService : Service() {
             return
         }
         userStopped = false
-        if (isNetworkReady()) {
-            waitingForNet = false
-            handler.removeCallbacks(netStartPoll)
-            startProxy()
-            return
-        }
+        val now = System.currentTimeMillis()
         if (!waitingForNet) {
             waitingForNet = true
-            netWaitStartMs = System.currentTimeMillis()
-            ProxyStatus.appendLog("Ожидание готовности сети перед запуском…")
+            netWaitStartMs = now
+            ProxyStatus.appendLog(
+                if (startFromBoot) "Автозапуск: ждём готовности сети и стабилизации системы…"
+                else "Ожидание готовности сети перед запуском…"
+            )
             ProxyStatus.setState(ProxyStatus.State.STOPPED)
-        } else if (System.currentTimeMillis() - netWaitStartMs > NET_WAIT_MAX_MS) {
-            // Сеть так и не подтвердилась — стартуем всё равно, чтобы не висеть вечно.
-            waitingForNet = false
-            handler.removeCallbacks(netStartPoll)
-            ProxyStatus.appendLog("Сеть не подтвердилась за ${NET_WAIT_MAX_MS / 1000} с — запуск всё равно")
+        }
+        val elapsed = now - netWaitStartMs
+
+        if (System.currentTimeMillis() - netWaitStartMs > NET_WAIT_MAX_MS) {
+            // Условия так и не выполнились — стартуем всё равно, чтобы не висеть вечно.
+            finishWaiting()
+            ProxyStatus.appendLog("Условия не выполнились за ${NET_WAIT_MAX_MS / 1000} с — запуск всё равно")
             startProxy()
             return
         }
+
+        // Готовность: сеть с интернетом + (для автозапуска) система не под давлением
+        // памяти и прошла минимальная пауза после загрузки.
+        val bootOk = !startFromBoot || (elapsed >= MIN_BOOT_SETTLE_MS && isSystemSettled())
+        if (bootOk && isNetworkReady()) {
+            finishWaiting()
+            startProxy()
+            return
+        }
+
         handler.removeCallbacks(netStartPoll)
         handler.postDelayed(netStartPoll, NET_POLL_MS)
+    }
+
+    private fun finishWaiting() {
+        waitingForNet = false
+        startFromBoot = false
+        handler.removeCallbacks(netStartPoll)
+    }
+
+    /** Система «улеглась» после загрузки: нет давления памяти и есть свободная ОЗУ. */
+    private fun isSystemSettled(): Boolean {
+        return try {
+            val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+            val mi = ActivityManager.MemoryInfo()
+            am.getMemoryInfo(mi)
+            !mi.lowMemory && mi.availMem >= mi.totalMem / 6  // свободно ≳ 16% ОЗУ
+        } catch (_: Exception) {
+            true // не смогли измерить — не блокируем запуск
+        }
     }
 
     private val netStartPoll = Runnable {
@@ -323,8 +361,9 @@ class ProxyService : Service() {
     @Synchronized
     private fun stopProxy(userInitiated: Boolean) {
         if (userInitiated) userStopped = true
-        // Отменяем ожидание сети, если оно было запущено.
+        // Отменяем ожидание сети/системы, если оно было запущено.
         waitingForNet = false
+        startFromBoot = false
         handler.removeCallbacks(netStartPoll)
         stopStatsUpdates()
         cancelPendingRestart()

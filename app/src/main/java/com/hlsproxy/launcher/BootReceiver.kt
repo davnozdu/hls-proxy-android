@@ -13,7 +13,7 @@ class BootReceiver : BroadcastReceiver() {
         ) {
             if (Prefs.isAutostart(context)) {
                 Prefs.setUserStopped(context, false)
-                ProxyController.start(context)
+                ProxyController.start(context, fromBoot = true)
             }
         }
     }
