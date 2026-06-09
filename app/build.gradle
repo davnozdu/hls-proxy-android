@@ -15,7 +15,7 @@ android {
         // На API 29+ untrusted_app получает EACCES — и hls-proxy падает на старте.
         // Тот же приём использует Termux.
         targetSdk 28
-        versionCode 18
+        versionCode 19
         versionName "2.0.7"
 
         // Android TV приставки / телефоны: 64-битные (arm64) и 32-битные (armv7) ARM.

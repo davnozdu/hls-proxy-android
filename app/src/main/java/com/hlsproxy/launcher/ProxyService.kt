@@ -200,15 +200,22 @@ class ProxyService : Service() {
 
     private fun startReader(p: Process) {
         val t = Thread {
+            // Диагностика: дублируем вывод дочернего процесса (proot + hls-proxy)
+            // в файл, чтобы можно было прочитать его через adb/run-as.
+            val logFile = File(File(filesDir, WORK_DIR), "proxy.log")
+            val fw = try { logFile.bufferedWriter() } catch (_: Exception) { null }
             try {
                 BufferedReader(InputStreamReader(p.inputStream)).use { br ->
                     var line: String?
                     while (br.readLine().also { line = it } != null) {
                         ProxyStatus.appendLog(line!!)
+                        try { fw?.appendLine(line!!); fw?.flush() } catch (_: Exception) {}
                     }
                 }
             } catch (_: Exception) {
                 // поток закрылся вместе с процессом
+            } finally {
+                try { fw?.close() } catch (_: Exception) {}
             }
             val code = try { p.waitFor() } catch (_: Exception) { -1 }
             onProcessExited(p, code)
