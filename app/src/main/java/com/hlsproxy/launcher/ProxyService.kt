@@ -80,6 +80,7 @@ class ProxyService : Service() {
     private var netWaitStartMs = 0L
 
     @Volatile private var lastBoundIp: String? = null
+    @Volatile private var proxyPid = -1
     private var healthFails = 0
     private var lastHealthMs = 0L
     private var netCallbackRegistered = false
@@ -315,6 +316,7 @@ class ProxyService : Service() {
         // это завершение уже обработано вручную, ничего не делаем.
         if (process !== p) return
         process = null
+        proxyPid = -1
         stopStatsUpdates()
         ProxyStatus.setStats(null)
         ProxyStatus.setState(ProxyStatus.State.STOPPED)
@@ -367,6 +369,7 @@ class ProxyService : Service() {
         cancelPendingRestart()
         val p = process
         process = null
+        proxyPid = -1
         if (p != null && p.isAlive) {
             try {
                 p.destroy()
@@ -406,10 +409,26 @@ class ProxyService : Service() {
         handler.removeCallbacks(statsTick)
     }
 
+    /**
+     * PID процесса прокси, закэшированный на время его жизни. Раньше PID искался
+     * сканированием всего /proc каждые 4 с (заметная нагрузка на слабую приставку).
+     * Берём его из Process.pid() (точно, без сканирования), с фолбэком на поиск
+     * по /proc один раз для API 24–25. Сбрасывается при остановке/завершении.
+     */
+    private fun resolvePid(): Int {
+        if (proxyPid > 0) return proxyPid
+        proxyPid = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process?.pid()?.toInt() ?: -1 else -1
+        } catch (_: Exception) {
+            -1
+        }
+        if (proxyPid <= 0) proxyPid = SysUtil.findPid(BIN_NAME)
+        return proxyPid
+    }
+
     private fun updateStats() {
         if (process?.isAlive != true) return
-        val pid = SysUtil.findPid(BIN_NAME)
-        val ramKb = SysUtil.readRssKb(pid)
+        val ramKb = SysUtil.readRssKb(resolvePid())
         val now = System.currentTimeMillis()
         val uptime = if (ProxyStatus.startTimeMs > 0) now - ProxyStatus.startTimeMs else 0
         val stats = ProxyStatus.Stats(ramKb, uptime, countActiveStreams())
