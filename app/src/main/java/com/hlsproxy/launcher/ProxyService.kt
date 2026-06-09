@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
@@ -54,6 +55,11 @@ class ProxyService : Service() {
         private const val FAILED_NOTIF_ID = 2
         private const val STATUS_NOTIF_ID = 3
         private const val DAILY_NOTIF_MS = 24 * 60 * 60 * 1000L
+
+        // Ожидание готовности сети перед стартом (актуально после перезагрузки:
+        // сеть на ТВ-боксах поднимается с задержкой, и плейлист иначе не качается).
+        private const val NET_POLL_MS = 3_000L          // как часто перепроверять сеть
+        private const val NET_WAIT_MAX_MS = 120_000L    // через сколько стартовать всё равно
     }
 
     private val handler = Handler(Looper.getMainLooper())
@@ -65,6 +71,8 @@ class ProxyService : Service() {
     @Volatile private var userStopped = false
     private val restartTimestamps = ArrayDeque<Long>()
     private var pendingRestart: Runnable? = null
+    @Volatile private var waitingForNet = false
+    private var netWaitStartMs = 0L
 
     @Volatile private var lastBoundIp: String? = null
     private var healthFails = 0
@@ -97,7 +105,7 @@ class ProxyService : Service() {
                 stopProxy(userInitiated = false)
                 startProxy()
             }
-            else -> control.execute { startProxy() } // ACTION_START или повторная доставка
+            else -> control.execute { requestStart() } // ACTION_START или повторная доставка
         }
         return START_STICKY
     }
@@ -110,6 +118,73 @@ class ProxyService : Service() {
     }
 
     // ---- Запуск / остановка процесса ----
+
+    /**
+     * Запрос на старт: не поднимаем сервер, пока сеть реально не готова
+     * (есть интернет). После перезагрузки приставки сеть инициализируется
+     * с задержкой — если стартовать раньше, hls-proxy не скачивает плейлист
+     * и больше не пытается, пока его не перезапустишь вручную. Поэтому ждём
+     * подтверждения сети (с периодическими проверками и таймаут-фолбэком).
+     */
+    @Synchronized
+    private fun requestStart() {
+        if (process?.isAlive == true) {
+            updateNotification()
+            return
+        }
+        userStopped = false
+        if (isNetworkReady()) {
+            waitingForNet = false
+            handler.removeCallbacks(netStartPoll)
+            startProxy()
+            return
+        }
+        if (!waitingForNet) {
+            waitingForNet = true
+            netWaitStartMs = System.currentTimeMillis()
+            ProxyStatus.appendLog("Ожидание готовности сети перед запуском…")
+            ProxyStatus.setState(ProxyStatus.State.STOPPED)
+        } else if (System.currentTimeMillis() - netWaitStartMs > NET_WAIT_MAX_MS) {
+            // Сеть так и не подтвердилась — стартуем всё равно, чтобы не висеть вечно.
+            waitingForNet = false
+            handler.removeCallbacks(netStartPoll)
+            ProxyStatus.appendLog("Сеть не подтвердилась за ${NET_WAIT_MAX_MS / 1000} с — запуск всё равно")
+            startProxy()
+            return
+        }
+        handler.removeCallbacks(netStartPoll)
+        handler.postDelayed(netStartPoll, NET_POLL_MS)
+    }
+
+    private val netStartPoll = Runnable {
+        if (!userStopped) control.execute { requestStart() }
+    }
+
+    /** Готова ли сеть: есть интернет-сеть, подтверждённая системой или реальным коннектом. */
+    private fun isNetworkReady(): Boolean {
+        return try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            val n = cm.activeNetwork ?: return false
+            val caps = cm.getNetworkCapabilities(n) ?: return false
+            if (!caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) return false
+            // Быстрый путь: система сама проверила, что интернет работает.
+            if (caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) return true
+            // Capability ещё не подтверждена — пробуем реально достучаться до DNS-сервера
+            // по IP (без резолва), это надёжно подтверждает наличие интернета.
+            canReach("8.8.8.8", 53) || canReach("1.1.1.1", 53)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun canReach(host: String, port: Int): Boolean = try {
+        java.net.Socket().use {
+            it.connect(java.net.InetSocketAddress(host, port), 2500)
+            true
+        }
+    } catch (_: Exception) {
+        false
+    }
 
     @Synchronized
     private fun startProxy() {
@@ -248,6 +323,9 @@ class ProxyService : Service() {
     @Synchronized
     private fun stopProxy(userInitiated: Boolean) {
         if (userInitiated) userStopped = true
+        // Отменяем ожидание сети, если оно было запущено.
+        waitingForNet = false
+        handler.removeCallbacks(netStartPoll)
         stopStatsUpdates()
         cancelPendingRestart()
         val p = process
@@ -343,7 +421,7 @@ class ProxyService : Service() {
     private fun restartProxyInternal() {
         stopStatsUpdates()
         stopProxy(userInitiated = false)
-        startProxy()
+        requestStart()
     }
 
     /** Приблизительное число активных потоков: уникальные ID каналов в свежем хвосте журнала. */
@@ -422,10 +500,17 @@ class ProxyService : Service() {
     }
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
-        override fun onAvailable(network: Network) = scheduleNetCheck()
-        override fun onLost(network: Network) = scheduleNetCheck()
-        override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) =
-            scheduleNetCheck()
+        override fun onAvailable(network: Network) { onNetEvent() }
+        override fun onLost(network: Network) { onNetEvent() }
+        override fun onLinkPropertiesChanged(network: Network, lp: android.net.LinkProperties) { onNetEvent() }
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) { onNetEvent() }
+    }
+
+    private fun onNetEvent() {
+        // Ждём старта и сеть появилась — пробуем подняться сразу, не дожидаясь поллинга.
+        if (waitingForNet && !userStopped) control.execute { requestStart() }
+        // Уже работаем — отслеживаем смену IP для перезапуска.
+        scheduleNetCheck()
     }
 
     private fun scheduleNetCheck() {
