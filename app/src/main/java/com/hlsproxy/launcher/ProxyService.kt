@@ -411,17 +411,10 @@ class ProxyService : Service() {
 
     /**
      * PID процесса прокси, закэшированный на время его жизни. Раньше PID искался
-     * сканированием всего /proc каждые 4 с (заметная нагрузка на слабую приставку).
-     * Берём его из Process.pid() (точно, без сканирования), с фолбэком на поиск
-     * по /proc один раз для API 24–25. Сбрасывается при остановке/завершении.
+     * сканированием всего /proc каждые 4 с (заметная нагрузка на слабую приставку);
+     * теперь ищем один раз и переиспользуем. Сбрасывается при остановке/завершении.
      */
     private fun resolvePid(): Int {
-        if (proxyPid > 0) return proxyPid
-        proxyPid = try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) process?.pid()?.toInt() ?: -1 else -1
-        } catch (_: Exception) {
-            -1
-        }
         if (proxyPid <= 0) proxyPid = SysUtil.findPid(BIN_NAME)
         return proxyPid
     }
