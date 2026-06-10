@@ -81,6 +81,8 @@ class ProxyService : Service() {
 
     @Volatile private var lastBoundIp: String? = null
     @Volatile private var proxyPid = -1
+    // Компилируем один раз (вызывается из метрик каждые несколько секунд).
+    private val streamIdRegex = Regex("""for stream .*\(([A-Za-z0-9]+)\)""")
     private var healthFails = 0
     private var lastHealthMs = 0L
     private var netCallbackRegistered = false
@@ -98,7 +100,7 @@ class ProxyService : Service() {
         startForegroundNow()
         when (intent?.action) {
             ACTION_STOP -> {
-                control.execute {
+                runOnControl {
                     stopProxy(userInitiated = true)
                     handler.post {
                         stopForegroundCompat()
@@ -107,13 +109,13 @@ class ProxyService : Service() {
                 }
                 return START_NOT_STICKY
             }
-            ACTION_RESTART -> control.execute {
+            ACTION_RESTART -> runOnControl {
                 stopProxy(userInitiated = false)
                 startProxy()
             }
             else -> { // ACTION_START или повторная доставка
                 if (intent?.getBooleanExtra(EXTRA_FROM_BOOT, false) == true) startFromBoot = true
-                control.execute { requestStart() }
+                runOnControl { requestStart() }
             }
         }
         return START_STICKY
@@ -121,9 +123,25 @@ class ProxyService : Service() {
 
     override fun onDestroy() {
         unregisterNetworkCallback()
-        control.execute { stopProxy(userInitiated = true) }
+        // Снимаем все отложенные задачи с handler'а, чтобы после shutdown не было
+        // попыток выполнить что-либо на уже закрытом control-потоке.
+        handler.removeCallbacksAndMessages(null)
+        runOnControl { stopProxy(userInitiated = true) }
         control.shutdown()
         super.onDestroy()
+    }
+
+    /**
+     * Безопасно выполнить задачу на control-потоке. После остановки сервиса
+     * (control.shutdown()) отложенные handler-колбэки могли бы вызвать execute на
+     * закрытом пуле и уронить процесс RejectedExecutionException — здесь это гасим.
+     */
+    private fun runOnControl(task: () -> Unit) {
+        if (control.isShutdown) return
+        try {
+            control.execute(task)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+        }
     }
 
     // ---- Запуск / остановка процесса ----
@@ -194,7 +212,7 @@ class ProxyService : Service() {
     }
 
     private val netStartPoll = Runnable {
-        if (!userStopped) control.execute { requestStart() }
+        if (!userStopped) runOnControl { requestStart() }
     }
 
     /** Готова ли сеть: есть интернет-сеть, подтверждённая системой или реальным коннектом. */
@@ -351,7 +369,7 @@ class ProxyService : Service() {
         ProxyStatus.appendLog("Перезапуск через ${RESTART_DELAY_MS / 1000} с…")
         val r = Runnable {
             if (!userStopped && !control.isShutdown) {
-                control.execute { if (!userStopped) startProxy() }
+                runOnControl { if (!userStopped) startProxy() }
             }
         }
         pendingRestart = r
@@ -395,7 +413,7 @@ class ProxyService : Service() {
 
     private val statsTick = object : Runnable {
         override fun run() {
-            control.execute { updateStats() }
+            runOnControl { updateStats() }
             handler.postDelayed(this, STATS_INTERVAL_MS)
         }
     }
@@ -483,9 +501,8 @@ class ProxyService : Service() {
     private fun countActiveStreams(): Int {
         val tail = ProxyStatus.logSnapshot().takeLast(40)
         val ids = HashSet<String>()
-        val re = Regex("""for stream .*\(([A-Za-z0-9]+)\)""")
         for (line in tail) {
-            re.find(line)?.let { ids.add(it.groupValues[1]) }
+            streamIdRegex.find(line)?.let { ids.add(it.groupValues[1]) }
         }
         return ids.size
     }
@@ -552,7 +569,7 @@ class ProxyService : Service() {
     // ---- Реакция на смену сети/IP ----
 
     private val netCheck = Runnable {
-        control.execute {
+        runOnControl {
             if (process?.isAlive == true && !userStopped) {
                 val ip = NetUtil.localIp(this)
                 if (ip != null && ip != lastBoundIp) {
@@ -572,7 +589,7 @@ class ProxyService : Service() {
 
     private fun onNetEvent() {
         // Ждём старта и сеть появилась — пробуем подняться сразу, не дожидаясь поллинга.
-        if (waitingForNet && !userStopped) control.execute { requestStart() }
+        if (waitingForNet && !userStopped) runOnControl { requestStart() }
         // Уже работаем — отслеживаем смену IP для перезапуска.
         scheduleNetCheck()
     }
